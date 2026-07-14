@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "csl-pyutil"
+version = "0.1.0"
+description = "Generic (non-Sanskrit-specific) Python helpers shared across the CDSL / Sanskrit-Lexicon repos"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "Sanskrit Lexicon / CDSL" }]
+keywords = ["cdsl", "lexicography", "review-sheet", "tooling"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+]
+
+[project.urls]
+Homepage = "https://github.com/sanskrit-lexicon/csl-pyutil"
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[tool.setuptools]
+packages = ["csl_pyutil"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

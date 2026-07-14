@@ -1,0 +1,81 @@
+{
+ "items": [
+  {
+   "id": "demo::sense1",
+   "filt": "pw",
+   "title": "demo1 &middot; layer-A &middot; sense 1",
+   "badges": [
+    "insertion-supplement",
+    "5-layer"
+   ],
+   "question": "Is the proposed subtype <b>&laquo;insertion-supplement&raquo;</b> correct for this sub-card? <span class=\"muted\">(reject &rarr; write the correct subtype in the note, for kappa)</span>",
+   "note_placeholder": "if reject: correct subtype + why (e.g. 'nws_at_sense, attaches to sense 2')",
+   "panels": [
+    [
+     "LLM proposal (confidence: llm)",
+     "<pre>subtype   : <b>insertion-supplement</b>\nop/dir    : insert / forward\ntarget    : sense 2 (anchor demo-anchor)\nevidence  : demo evidence string</pre>"
+    ],
+    [
+     "Sub-card &mdash; Russian (ru)",
+     "<pre>[SYNTHETIC placeholder RU body for fixture testing]</pre>"
+    ],
+    [
+     "Sub-card &mdash; source (de)",
+     "<pre>[SYNTHETIC placeholder DE body for fixture testing]</pre>"
+    ]
+   ]
+  },
+  {
+   "id": "demo::sense2",
+   "filt": "sch",
+   "title": "demo2 &middot; layer-B &middot; sense 3",
+   "badges": [
+    "nws_at_sense",
+    "tail"
+   ],
+   "question": "Is the proposed subtype <b>&laquo;nws_at_sense&raquo;</b> correct for this sub-card? <span class=\"muted\">(reject &rarr; write the correct subtype in the note, for kappa)</span>",
+   "note_placeholder": "if reject: correct subtype + why (e.g. 'nws_at_sense, attaches to sense 2')",
+   "panels": [
+    [
+     "LLM proposal (confidence: llm)",
+     "<pre>subtype   : <b>nws_at_sense</b>\nop/dir    : attach / backward\ntarget    : sense 1 (anchor demo-anchor-2)\nevidence  : another demo evidence string</pre>"
+    ],
+    [
+     "Sub-card &mdash; Russian (ru)",
+     "<pre>[SYNTHETIC placeholder RU body 2]</pre>"
+    ],
+    [
+     "Sub-card &mdash; source (de)",
+     "<pre>[SYNTHETIC placeholder DE body 2]</pre>"
+    ]
+   ]
+  }
+ ],
+ "config": {
+  "sheet_id": "demo-fixture-2026-07-14",
+  "title": "H180 demo fixture",
+  "subtitle": "synthetic fixture for csl-pyutil byte-identical port verification",
+  "footer": "Approve = the LLM subtype is right &middot; Reject = wrong (write the correct subtype in the note) &middot; Defer = can't tell.",
+  "approve_label": "Correct",
+  "reject_label": "Wrong",
+  "filters": [
+   [
+    "pw",
+    "pw"
+   ],
+   [
+    "sch",
+    "sch"
+   ],
+   [
+    "pwkvn",
+    "pwkvn"
+   ],
+   [
+    "nws",
+    "nws"
+   ]
+  ],
+  "generated": "2026-07-14"
+ }
+}
