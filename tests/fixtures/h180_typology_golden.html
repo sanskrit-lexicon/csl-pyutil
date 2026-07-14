@@ -150,7 +150,7 @@ evidence  : another demo evidence string</pre></div><div class="panel"><h4>Sub-c
       items: ids.map(function (id) { var rec = state[id] || {}; return { id: id, decision: rec.decision || null, note: rec.note || '' }; }) };
     var blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
     var url = URL.createObjectURL(blob); var a = document.createElement('a');
-    a.href = url; a.download = 'decisions.json'; document.body.appendChild(a); a.click();
+    a.href = url; a.download = SHEET_ID + '_decisions.json'; document.body.appendChild(a); a.click();
     document.body.removeChild(a); URL.revokeObjectURL(url);
   });
   var filterbar = document.getElementById('filterbar');

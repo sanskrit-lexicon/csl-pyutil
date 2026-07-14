@@ -18,11 +18,18 @@ anchors in the core template, not by touching the core template itself — so
 extras=False reproduces the donor's literal historical output exactly (see
 tests/test_fixture_byte_identical.py), while extras=True is what real callers
 should use.
+
+One deliberate deviation from byte-for-byte donor fidelity: the download
+button's `a.download` filename is `SHEET_ID + '_decisions.json'`, not the
+donor's literal `'decisions.json'` — the generic name collided with every
+other sheet's export in a flat Downloads/ folder, violating the org's
+no-generic-filename convention (found 14-07-2026 auditing the H931 port; see
+tests/fixtures/h180_typology_golden.html, regenerated to match).
 """
 import html
 import json
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = ["render_review_sheet", "esc"]
 
@@ -156,7 +163,7 @@ _CORE_TEMPLATE = '''<!DOCTYPE html>
       items: ids.map(function (id) { var rec = state[id] || {}; return { id: id, decision: rec.decision || null, note: rec.note || '' }; }) };
     var blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
     var url = URL.createObjectURL(blob); var a = document.createElement('a');
-    a.href = url; a.download = 'decisions.json'; document.body.appendChild(a); a.click();
+    a.href = url; a.download = SHEET_ID + '_decisions.json'; document.body.appendChild(a); a.click();
     document.body.removeChild(a); URL.revokeObjectURL(url);
   });
   var filterbar = document.getElementById('filterbar');
