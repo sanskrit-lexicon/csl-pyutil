@@ -49,6 +49,12 @@ html = render_review_sheet(
         "approve_label": "Approve", "reject_label": "Reject",
         "filters": [("typeA", "Type A"), ("typeB", "Type B")],
         "generated": "2026-07-14",  # caller-supplied, never computed here — deterministic output
+        # Optional: make final exports publication-review admissible.
+        "strict_review": {
+            "reviewer": "gasyoun",
+            "require_all_votes": True,
+            "require_reject_note": True,
+        },
     },
 )
 open("review/commentarystrategies-sundarakanda_35-37_review.html", "w",
@@ -72,6 +78,20 @@ needs no changes):
 {"sheet_id": "...", "generated": "2026-07-14T12:00:00.000Z", "decided": 12,
  "items": [{"id": "L142", "decision": "approve", "note": ""}, ...]}
 ```
+
+With `strict_review`, the same payload gains additive top-level fields:
+
+```json
+{"sheet_id": "...", "generated": "2026-07-14", "decided": 12,
+ "reviewer": "gasyoun", "reviewedAt": "2026-07-17T20:45:00.000Z",
+ "complete": true,
+ "items": [{"id": "L142", "decision": "approve", "note": ""}, ...]}
+```
+
+Partial File System Access API auto-saves use `complete: false` and
+`reviewedAt: null`. Final download is blocked until the reviewer is non-empty,
+every item is voted, and every rejected item has a note. Callers that omit
+`strict_review` retain the 0.1.x behavior and byte-identical core rendering.
 
 See [`csl_pyutil/review_sheet.py`](csl_pyutil/review_sheet.py) for the full
 item/config schema docstring.
