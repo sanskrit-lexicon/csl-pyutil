@@ -29,7 +29,7 @@ tests/fixtures/h180_typology_golden.html, regenerated to match).
 import html
 import json
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 
 __all__ = ["render_review_sheet", "esc"]
 
@@ -270,6 +270,94 @@ _AUTOSAVE_JS = '''
   }
 '''
 
+_AUTOSAVE_EXPORT_FUNCTION = '''  function exportPayload() {
+    var decided = ids.filter(function (id) { return state[id] && state[id].decision; }).length;
+    return JSON.stringify({ sheet_id: SHEET_ID, generated: new Date().toISOString(), decided: decided,
+      items: ids.map(function (id) { var rec = state[id] || {}; return { id: id, decision: rec.decision || null, note: rec.note || '' }; }) }, null, 2);
+  }
+'''
+
+_STRICT_REVIEWER_HTML = '''<label id="strictReviewerWrap" style="display:flex;align-items:center;gap:6px;font-size:13px">
+    Reviewer <input id="strictReviewer" type="text" autocomplete="name" style="background:#11141a;color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px 9px" />
+  </label>
+  <span id="strictReviewError" role="alert" style="color:var(--bad);font-size:12px"></span>'''
+
+
+def _strict_review_js(policy):
+    """Return the additive strict-export controller for a normalized policy."""
+    return '''
+  var STRICT_REVIEW = %s;
+  var strictReviewer = document.getElementById('strictReviewer');
+  var strictError = document.getElementById('strictReviewError');
+  strictReviewer.value = state.__reviewer || STRICT_REVIEW.reviewer || '';
+  function strictItems() {
+    return ids.map(function (id) {
+      var rec = state[id] || {};
+      return { id: id, decision: rec.decision || null, note: rec.note || '' };
+    });
+  }
+  function strictValidation() {
+    var items = strictItems();
+    var reviewer = strictReviewer.value.trim();
+    var unvoted = STRICT_REVIEW.requireAllVotes ? items.filter(function (item) { return !item.decision; }) : [];
+    var rejectedWithoutNote = STRICT_REVIEW.requireRejectNote ? items.filter(function (item) {
+      return item.decision === 'reject' && !item.note.trim();
+    }) : [];
+    var errors = [];
+    if (!reviewer) errors.push('reviewer is required');
+    if (unvoted.length) errors.push(unvoted.length + ' item(s) remain unvoted');
+    if (rejectedWithoutNote.length) errors.push(rejectedWithoutNote.length + ' rejection(s) need a note');
+    return { reviewer: reviewer, items: items, complete: errors.length === 0, errors: errors };
+  }
+  function strictPayload() {
+    var result = strictValidation();
+    var decided = result.items.filter(function (item) { return !!item.decision; }).length;
+    return { sheet_id: SHEET_ID, generated: %s, decided: decided,
+      reviewer: result.reviewer, reviewedAt: result.complete ? new Date().toISOString() : null,
+      complete: result.complete, items: result.items };
+  }
+  strictReviewer.addEventListener('input', function () {
+    state.__reviewer = strictReviewer.value;
+    strictError.textContent = '';
+    save();
+  });
+  document.getElementById('downloadBtn').addEventListener('click', function (event) {
+    event.preventDefault(); event.stopImmediatePropagation();
+    var result = strictValidation();
+    if (!result.complete) {
+      strictError.textContent = result.errors.join('; ');
+      if (!result.reviewer) strictReviewer.focus();
+      return;
+    }
+    strictError.textContent = '';
+    var blob = new Blob([JSON.stringify(strictPayload(), null, 2)], { type:'application/json' });
+    var url = URL.createObjectURL(blob); var a = document.createElement('a');
+    a.href = url; a.download = SHEET_ID + '_decisions.json'; document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+  }, true);
+''' % (json.dumps(policy), json.dumps(policy["generated"]))
+
+
+def _add_strict_review(doc, policy):
+    """Add strict review metadata and final-export validation without touching core."""
+    toolbar_anchor = '<div class="filterbar" id="filterbar">'
+    if toolbar_anchor not in doc:
+        raise ValueError("review-sheet toolbar anchor is missing")
+    doc = doc.replace(toolbar_anchor, _STRICT_REVIEWER_HTML + '\n  ' + toolbar_anchor, 1)
+
+    autosave_export = _AUTOSAVE_EXPORT_FUNCTION
+    if autosave_export not in doc:
+        raise ValueError("strict_review requires extras=True auto-save support")
+    doc = doc.replace(
+        autosave_export,
+        "  function exportPayload() {\n    return JSON.stringify(strictPayload(), null, 2);\n  }\n",
+        1,
+    )
+    autosave_anchor = "\n  var saveHandle = null, saveTimer = null;"
+    if autosave_anchor not in doc:
+        raise ValueError("review-sheet auto-save anchor is missing")
+    return doc.replace(autosave_anchor, _strict_review_js(policy) + autosave_anchor, 1)
+
 
 def _add_extras(doc):
     doc = doc.replace(
@@ -297,6 +385,12 @@ def render_review_sheet(items, config, *, extras=True):
     extras: fold in the H779 auto-save + legend additions (default True for
         real callers). Pass False only to reproduce a pre-H779 shell's
         literal historical output (see tests/test_fixture_byte_identical.py).
+    config["strict_review"]: optional mapping enabling an additive strict
+        decisions export. ``reviewer`` supplies the initial reviewer ID;
+        ``require_all_votes`` and ``require_reject_note`` default to True.
+        Strict exports add top-level ``reviewer``, ``reviewedAt``, and
+        ``complete`` fields. Partial auto-saves remain possible with
+        ``complete:false``; final download is blocked until the policy passes.
 
     Returns the full HTML document as a string.
     """
@@ -314,4 +408,24 @@ def render_review_sheet(items, config, *, extras=True):
         "sheet_id_json": json.dumps(config["sheet_id"]), "ids_json": json.dumps(ids),
         "generated_json": json.dumps(config["generated"]),
     }
-    return _add_extras(doc) if extras else doc
+    if not extras and config.get("strict_review") is not None:
+        raise ValueError("strict_review requires extras=True")
+    if not extras:
+        return doc
+
+    doc = _add_extras(doc)
+    strict = config.get("strict_review")
+    if strict is None:
+        return doc
+    if not isinstance(strict, dict):
+        raise TypeError("strict_review must be a mapping")
+    reviewer = strict.get("reviewer", "")
+    if not isinstance(reviewer, str):
+        raise TypeError("strict_review.reviewer must be a string")
+    policy = {
+        "reviewer": reviewer,
+        "requireAllVotes": bool(strict.get("require_all_votes", True)),
+        "requireRejectNote": bool(strict.get("require_reject_note", True)),
+        "generated": config["generated"],
+    }
+    return _add_strict_review(doc, policy)

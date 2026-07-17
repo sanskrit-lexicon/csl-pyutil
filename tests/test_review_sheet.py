@@ -99,3 +99,44 @@ def test_generated_is_caller_supplied_not_computed():
     out2 = render_review_sheet(_items(), _config(generated="2020-01-01"))
     assert out1 == out2  # fully deterministic given the same explicit "generated"
     assert "2020-01-01" in out1
+
+
+def test_strict_review_adds_metadata_and_completion_guards():
+    out = render_review_sheet(
+        _items(),
+        _config(strict_review={"reviewer": "gasyoun"}),
+    )
+    assert 'id="strictReviewer"' in out
+    assert '"reviewer": "gasyoun"' in out
+    assert "reviewedAt: result.complete ? new Date().toISOString() : null" in out
+    assert "complete: result.complete" in out
+    assert "item(s) remain unvoted" in out
+    assert "rejection(s) need a note" in out
+    assert "event.stopImmediatePropagation()" in out
+    assert "return JSON.stringify(strictPayload(), null, 2)" in out
+
+
+def test_strict_review_keeps_existing_storage_key_and_filename():
+    out = render_review_sheet(
+        _items(),
+        _config(strict_review={"reviewer": "gasyoun"}),
+    )
+    assert "var STORE_KEY = 'review-sheet:' + SHEET_ID" in out
+    assert "a.download = SHEET_ID + '_decisions.json'" in out
+    assert "state.__reviewer" in out
+
+
+def test_legacy_default_has_no_strict_fields():
+    out = render_review_sheet(_items(), _config())
+    assert 'id="strictReviewer"' not in out
+    assert "strictPayload" not in out
+    assert "complete: result.complete" not in out
+
+
+def test_strict_review_requires_extras_and_valid_reviewer_type():
+    with pytest.raises(ValueError, match="requires extras=True"):
+        render_review_sheet(_items(), _config(strict_review={}), extras=False)
+    with pytest.raises(TypeError, match="must be a mapping"):
+        render_review_sheet(_items(), _config(strict_review=True))
+    with pytest.raises(TypeError, match="reviewer must be a string"):
+        render_review_sheet(_items(), _config(strict_review={"reviewer": 123}))

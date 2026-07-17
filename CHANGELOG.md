@@ -5,6 +5,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-17
+
+### Added — optional strict review exports
+
+`render_review_sheet()` now accepts an optional `strict_review` policy. Strict
+sheets preserve the existing decisions shape and add `reviewer`, `reviewedAt`,
+and `complete`; final download requires reviewer attribution, a vote on every
+item, and a non-empty note for every rejection. File-system auto-save continues
+to write resumable partial drafts with `complete:false`, while the existing
+sheet ID, item IDs, localStorage key, and named download remain unchanged.
+
 ## [0.1.1] - 2026-07-14
 
 ### Fixed — generic download filename collision
