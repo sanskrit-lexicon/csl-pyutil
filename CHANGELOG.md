@@ -5,6 +5,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-19
+
+### Added — the 19-07-2026 review-sheet standard (V1–V8)
+
+The org-wide sheet standard ratified from the `h178_da` vote's meta-note
+([H178 DA-vote issue register §2](https://github.com/gasyoun/SanskritLexicography/blob/master/RussianTranslation/pwg_ru/H178_DA_VOTE_ISSUE_REGISTER_2026-07-19.md)),
+implemented as additive string-surgery layers on the frozen core template
+(the byte-identical fixture contract is untouched — with no standard option
+set, output is unchanged):
+
+- **V1/V5 `config["rating"]`** — a 1..scale click-button row **below** the
+  card content (never above; replaces slider-style widgets), with a visible
+  approval threshold and approve-vote coupling (voting approve auto-raises
+  the rating to `approve_min`, default 4; manual clicks can then lower or
+  raise it). Export items gain a fourth field `rating` (number|null) in the
+  core, auto-save, and strict payload constructors alike.
+- **V3 `config["show_ids"]`** — every card shows its `id` as a copyable
+  monospace chip the reviewer can cite back.
+- **V4 item `title_href`** — the card header becomes a clickable link to
+  the full source entry.
+- **V6 `config["note_min_height_px"]`** — taller free-text note box.
+- **V7 `mark_cyrillic()`** — new exported helper wrapping Cyrillic runs in
+  `<mark class="hl">` (matching style ships with the standard CSS), so the
+  Russian words under judgment are visually distinct from markup and German.
+- **V8 `config["save_as"]`** — an always-visible banner naming the
+  `sheet_id`, the download filename, and the exact destination path, binding
+  a downloaded decisions file to its sheet for both human and agent.
+
 ## [0.2.0] - 2026-07-17
 
 ### Added — optional strict review exports
