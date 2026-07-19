@@ -28,14 +28,34 @@ tests/fixtures/h180_typology_golden.html, regenerated to match).
 """
 import html
 import json
+import re
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
-__all__ = ["render_review_sheet", "esc"]
+__all__ = ["render_review_sheet", "esc", "mark_cyrillic"]
 
 
 def esc(s):
     return html.escape("" if s is None else str(s))
+
+
+_CYR_RUN = re.compile(u"[Ѐ-ӿ][Ѐ-ӿ́-]*")
+_TAG_SPLIT = re.compile(r"(<[^>]+>)")
+
+
+def mark_cyrillic(html_text):
+    """Wrap every Cyrillic word-run in ``<mark class="hl">`` (V7 of the
+    19-07-2026 review-sheet standard: the Russian words under judgment are
+    color-highlighted so the eye lands on what is being reviewed). Operates
+    only on text between tags, so existing markup is never corrupted. The
+    matching ``mark.hl`` style ships with the standard CSS layer — callers
+    just wrap their card HTML with this before passing it in."""
+    parts = _TAG_SPLIT.split(html_text)
+    for i, part in enumerate(parts):
+        if part.startswith("<"):
+            continue
+        parts[i] = _CYR_RUN.sub(lambda m: '<mark class="hl">%s</mark>' % m.group(0), part)
+    return "".join(parts)
 
 
 # ----------------------------------------------------------------------------- core template
@@ -201,17 +221,35 @@ _CORE_TEMPLATE = '''<!DOCTYPE html>
 '''
 
 
-def render_card(item, approve_label, reject_label):
+def render_card(item, approve_label, reject_label, *, show_id=False, rating=None):
     """Ported verbatim from build_h180_review_sheets.py — item shape:
     {"id", "filt", "title", "badges": [...], "question" (HTML), "panels":
-    [(heading, html_body), ...], "note_placeholder" (optional)}."""
+    [(heading, html_body), ...], "note_placeholder" (optional), "title_href"
+    (optional — V4 of the 19-07-2026 standard: the card header becomes a
+    clickable link to the full source entry)}.
+
+    With ``show_id=False`` and ``rating=None`` and no ``title_href`` the
+    output is byte-identical to the v0.2.0 renderer (fixture contract)."""
     panels = "".join(
         '<div class="panel"><h4>%s</h4>%s</div>' % (esc(h4), body)
         for h4, body in item["panels"])
     badges = "".join('<span class="badge">%s</span>' % esc(b) for b in item.get("badges", []))
+    title_html = esc(item["title"])
+    if item.get("title_href"):
+        title_html = '<a class="hwlink" href="%s" target="_blank" rel="noopener">%s</a>' % (
+            esc(item["title_href"]), title_html)
+    idchip = ""
+    if show_id:
+        idchip = '<span class="idchip" title="card id — cite this id back when discussing this card">%s</span>' % esc(item["id"])
+    rating_row = ""
+    if rating is not None:
+        btns = "".join('<button class="rate" data-rate="%d">%d</button>' % (v, v)
+                       for v in range(1, rating["scale"] + 1))
+        rating_row = ('\n    <div class="ratingrow"><span class="ratinglabel">%s</span>%s'
+                      '<span class="rate-state">unrated</span></div>' % (esc(rating["label"]), btns))
     return '''
   <section class="card" data-id="%s" data-filt="%s">
-    <header><div class="hw">%s %s</div></header>
+    <header><div class="hw">%s %s</div>%s</header>
     <div class="question">%s</div>
     %s
     <div class="controls">
@@ -219,10 +257,11 @@ def render_card(item, approve_label, reject_label):
       <button class="vote reject" data-vote="reject">&#10060; %s</button>
       <button class="vote defer" data-vote="defer">&#9208; Defer</button>
       <span class="vote-state">unvoted</span>
-    </div>
+    </div>%s
     <textarea class="note" placeholder="%s"></textarea>
-  </section>''' % (esc(item["id"]), esc(item["filt"]), esc(item["title"]), badges,
+  </section>''' % (esc(item["id"]), esc(item["filt"]), title_html, badges, idchip,
                    item["question"], panels, esc(approve_label), esc(reject_label),
+                   rating_row,
                    esc(item.get("note_placeholder", "free-text note (optional)")))
 
 
@@ -359,6 +398,101 @@ def _add_strict_review(doc, policy):
     return doc.replace(autosave_anchor, _strict_review_js(policy) + autosave_anchor, 1)
 
 
+# ----------------------------------------------------------------------------- 19-07-2026 standard (V1–V8)
+# The org-wide review-sheet standard ratified from the h178_da vote's meta-note
+# (SanskritLexicography/RussianTranslation/pwg_ru/H178_DA_VOTE_ISSUE_REGISTER_2026-07-19.md §2):
+# V1/V5 rating buttons below the card content with approve-coupling, V3 visible
+# card ids, V4 clickable card headers, V6 taller note box, V7 highlight style,
+# V8 in-sheet sheet_id + save-path banner. All additive string surgery on the
+# frozen core template, exactly like the H779 extras layer.
+
+_STANDARD_CSS = '''  .idchip { font-family:ui-monospace,Consolas,monospace; font-size:11px; color:var(--muted);
+            background:var(--panel2); border:1px solid var(--border); padding:2px 7px;
+            border-radius:6px; user-select:all; }
+  .card header { gap:10px; }
+  .hw a.hwlink { color:inherit; text-decoration:underline dotted; text-underline-offset:3px; }
+  .hw a.hwlink:hover { color:var(--accent); }
+  mark.hl { background:#453407; color:#ffd75e; padding:0 2px; border-radius:3px; }
+  .savebanner { max-width:980px; margin:10px auto 0; padding:8px 20px; font-size:12.5px; }
+  .savebanner code { background:var(--panel2); border:1px solid var(--border); padding:1px 6px; border-radius:5px; }
+  .ratingrow { display:flex; align-items:center; gap:6px; margin-top:10px; flex-wrap:wrap; }
+  .ratinglabel { font-size:12px; color:var(--muted); margin-right:4px; }
+  button.rate { border:1px solid var(--border); background:var(--panel2); color:var(--text);
+                width:34px; padding:6px 0; border-radius:6px; cursor:pointer; font-size:13px; }
+  button.rate.active { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button.rate.active.below { background:var(--defer); border-color:var(--defer); color:#2a1d02; }
+  .rate-state { font-size:12px; color:var(--muted); margin-left:4px; }
+'''
+
+_RATING_ITEM_OLD = "{ id: id, decision: rec.decision || null, note: rec.note || '' }"
+_RATING_ITEM_NEW = ("{ id: id, decision: rec.decision || null, note: rec.note || '', "
+                    "rating: (rec.rating == null ? null : rec.rating) }")
+
+
+def _rating_js(rating):
+    return '''
+  var RATING = %s;
+  function ratingCardById(id) {
+    var found = null;
+    document.querySelectorAll('.card').forEach(function (c) { if (c.getAttribute('data-id') === id) found = c; });
+    return found;
+  }
+  function applyRatingUI(card) {
+    var id = card.getAttribute('data-id'); var rec = state[id] || {};
+    var v = (rec.rating == null ? null : rec.rating);
+    card.querySelectorAll('button.rate').forEach(function (b) {
+      var bv = parseInt(b.getAttribute('data-rate'), 10);
+      b.classList.toggle('active', v !== null && bv === v);
+      b.classList.toggle('below', v !== null && bv === v && v < RATING.threshold);
+    });
+    var st = card.querySelector('.rate-state');
+    if (st) st.textContent = (v === null ? 'unrated'
+      : RATING.label + ' ' + v + '/' + RATING.scale + (v < RATING.threshold ? ' — below approval threshold (' + RATING.threshold + ')' : ''));
+  }
+  function setRating(id, v) { state[id] = state[id] || {}; state[id].rating = v; save(); }
+  document.querySelectorAll('.card').forEach(function (card) {
+    var id = card.getAttribute('data-id');
+    card.querySelectorAll('button.rate').forEach(function (btn) {
+      btn.addEventListener('click', function () { setRating(id, parseInt(btn.getAttribute('data-rate'), 10)); applyRatingUI(card); });
+    });
+    applyRatingUI(card);
+  });
+  var _ratingOrigVote = vote;
+  vote = function (id, d) {
+    _ratingOrigVote(id, d);
+    if (d === 'approve') {
+      var rec = state[id] || {};
+      if (rec.rating == null || rec.rating < RATING.approveMin) { state[id].rating = RATING.approveMin; save(); }
+      var card = ratingCardById(id); if (card) applyRatingUI(card);
+    }
+  };
+''' % json.dumps(rating)
+
+
+def _add_standard(doc, *, save_as=None, sheet_id=None, note_min_height_px=None, rating=None):
+    """Apply the 19-07-2026 standard layers. Each is independent surgery on a
+    stable core-template anchor; nothing here touches _CORE_TEMPLATE itself."""
+    doc = doc.replace("</style>", _STANDARD_CSS + "</style>", 1)
+    if note_min_height_px is not None:
+        doc = doc.replace("textarea.note { width:100%; margin-top:10px; min-height:44px;",
+                          "textarea.note { width:100%; margin-top:10px; min-height:"
+                          + str(int(note_min_height_px)) + "px;", 1)
+    if save_as:
+        banner_anchor = '<div class="toolbar">'
+        banner = ('<div class="savebanner">&#128229; Your export downloads as '
+                  "<code>%s_decisions.json</code> &rarr; save it to <code>%s</code> "
+                  "(the <code>sheet_id</code> inside the file is <code>%s</code> — that is how a later "
+                  "session knows which sheet these decisions belong to).</div>\n"
+                  % (esc(sheet_id), esc(save_as), esc(sheet_id)))
+        if banner_anchor not in doc:
+            raise ValueError("review-sheet toolbar anchor is missing")
+        doc = doc.replace(banner_anchor, banner + banner_anchor, 1)
+    if rating is not None:
+        doc = doc.replace(_RATING_ITEM_OLD, _RATING_ITEM_NEW)
+        doc = doc.replace("})();\n</script>", _rating_js(rating) + "})();\n</script>", 1)
+    return doc
+
+
 def _add_extras(doc):
     doc = doc.replace(
         '<button class="dl" id="downloadBtn">Download decisions.json</button>',
@@ -392,9 +526,49 @@ def render_review_sheet(items, config, *, extras=True):
         ``complete`` fields. Partial auto-saves remain possible with
         ``complete:false``; final download is blocked until the policy passes.
 
+    19-07-2026 standard options (all optional and additive — with none of
+    them set, and no item carrying ``title_href``, output is unchanged):
+
+    - ``config["show_ids"]`` (V3): render each card's ``id`` as a visible,
+      copyable chip in the card header so the reviewer can cite it back.
+    - item ``title_href`` (V4): card header title becomes a clickable link
+      to the full source entry (generator supplies the URL).
+    - ``config["rating"]`` (V1+V5): ``{"label": "DA", "scale": 5,
+      "threshold": 3, "approve_min": 4}`` — a row of 1..scale click-buttons
+      BELOW the card content (never above); values below ``threshold`` show
+      a warning color; voting approve auto-raises the rating to at least
+      ``approve_min`` (manual clicks can then lower/raise it). The export's
+      items gain a fourth field ``rating`` (number or null).
+    - ``config["note_min_height_px"]`` (V6): taller note textarea.
+    - ``config["save_as"]`` (V8): exact destination path for the exported
+      decisions file, rendered as an always-visible banner together with the
+      ``sheet_id`` so both the human and a later agent can bind the export
+      to this sheet.
+    - ``mark_cyrillic()`` (V7): helper for generators — wraps Cyrillic runs
+      in ``<mark class="hl">``; the matching style ships with the standard
+      CSS (always included once any standard option is active).
+
     Returns the full HTML document as a string.
     """
-    cards = "\n".join(render_card(it, config["approve_label"], config["reject_label"]) for it in items)
+    show_ids = bool(config.get("show_ids", False))
+    rating = config.get("rating")
+    if rating is not None:
+        if not isinstance(rating, dict):
+            raise TypeError("rating must be a mapping")
+        rating = {
+            "label": str(rating.get("label", "Rating")),
+            "scale": int(rating.get("scale", 5)),
+            "threshold": int(rating.get("threshold", 3)),
+            "approveMin": int(rating.get("approve_min", 4)),
+        }
+        if not (1 <= rating["threshold"] <= rating["scale"]) or not (1 <= rating["approveMin"] <= rating["scale"]):
+            raise ValueError("rating threshold/approve_min must lie within 1..scale")
+    save_as = config.get("save_as")
+    note_min_height_px = config.get("note_min_height_px")
+    standard_on = bool(show_ids or rating is not None or save_as or note_min_height_px is not None
+                       or any(it.get("title_href") for it in items))
+    cards = "\n".join(render_card(it, config["approve_label"], config["reject_label"],
+                                  show_id=show_ids, rating=rating) for it in items)
     filters = ('<button data-filter="all" class="active">all</button>'
                + "".join('<button data-filter="%s">%s</button>' % (esc(k), esc(l))
                          for k, l in config["filters"])
@@ -411,21 +585,27 @@ def render_review_sheet(items, config, *, extras=True):
     if not extras and config.get("strict_review") is not None:
         raise ValueError("strict_review requires extras=True")
     if not extras:
+        if standard_on:
+            return _add_standard(doc, save_as=save_as, sheet_id=config["sheet_id"],
+                                 note_min_height_px=note_min_height_px, rating=rating)
         return doc
 
     doc = _add_extras(doc)
     strict = config.get("strict_review")
-    if strict is None:
-        return doc
-    if not isinstance(strict, dict):
-        raise TypeError("strict_review must be a mapping")
-    reviewer = strict.get("reviewer", "")
-    if not isinstance(reviewer, str):
-        raise TypeError("strict_review.reviewer must be a string")
-    policy = {
-        "reviewer": reviewer,
-        "requireAllVotes": bool(strict.get("require_all_votes", True)),
-        "requireRejectNote": bool(strict.get("require_reject_note", True)),
-        "generated": config["generated"],
-    }
-    return _add_strict_review(doc, policy)
+    if strict is not None:
+        if not isinstance(strict, dict):
+            raise TypeError("strict_review must be a mapping")
+        reviewer = strict.get("reviewer", "")
+        if not isinstance(reviewer, str):
+            raise TypeError("strict_review.reviewer must be a string")
+        policy = {
+            "reviewer": reviewer,
+            "requireAllVotes": bool(strict.get("require_all_votes", True)),
+            "requireRejectNote": bool(strict.get("require_reject_note", True)),
+            "generated": config["generated"],
+        }
+        doc = _add_strict_review(doc, policy)
+    if standard_on:
+        doc = _add_standard(doc, save_as=save_as, sheet_id=config["sheet_id"],
+                            note_min_height_px=note_min_height_px, rating=rating)
+    return doc

@@ -140,3 +140,77 @@ def test_strict_review_requires_extras_and_valid_reviewer_type():
         render_review_sheet(_items(), _config(strict_review=True))
     with pytest.raises(TypeError, match="reviewer must be a string"):
         render_review_sheet(_items(), _config(strict_review={"reviewer": 123}))
+
+
+# ----------------------------------------------------------------------- 19-07-2026 standard (V1-V8)
+
+def test_standard_off_by_default_is_unchanged():
+    out_old_shape = render_review_sheet(_items(), _config(), extras=False)
+    assert "idchip" not in out_old_shape
+    assert "savebanner" not in out_old_shape
+    assert "ratingrow" not in out_old_shape
+    assert "mark.hl" not in out_old_shape
+
+
+def test_show_ids_renders_visible_chip():
+    out = render_review_sheet(_items(), _config(show_ids=True))
+    assert out.count('class="idchip"') == 2
+    assert ">L1</span>" in out
+
+
+def test_title_href_makes_header_clickable():
+    items = _items()
+    items[0]["title_href"] = "https://example.org/entry/one"
+    out = render_review_sheet(items, _config())
+    assert '<a class="hwlink" href="https://example.org/entry/one"' in out
+    assert out.count("hwlink") >= 1
+
+
+def test_rating_buttons_below_content_and_payload_field():
+    out = render_review_sheet(_items(), _config(rating={"label": "DA", "scale": 5,
+                                                        "threshold": 3, "approve_min": 4}))
+    assert out.count('class="ratingrow"') == 2
+    controls_pos = out.index('class="controls"')
+    rating_pos = out.index('class="ratingrow"')
+    assert rating_pos > controls_pos  # V1: below the card content, never above
+    assert "rating: (rec.rating == null ? null : rec.rating)" in out
+    assert '"approveMin": 4' in out
+    assert '"threshold": 3' in out
+
+
+def test_rating_validation():
+    with pytest.raises(ValueError):
+        render_review_sheet(_items(), _config(rating={"scale": 5, "threshold": 9}))
+
+
+def test_save_as_banner_names_sheet_and_path():
+    out = render_review_sheet(_items(), _config(save_as=r"RussianTranslation\pwg_ru\eval\x.decisions.json"))
+    assert 'class="savebanner"' in out
+    assert "test-sheet_scope_decisions.json" in out
+    assert "x.decisions.json" in out
+
+
+def test_note_min_height():
+    out = render_review_sheet(_items(), _config(note_min_height_px=88))
+    assert "min-height:88px" in out
+    assert "min-height:44px" not in out
+
+
+def test_standard_composes_with_strict_review():
+    out = render_review_sheet(_items(), _config(
+        strict_review={"reviewer": "MG"}, show_ids=True,
+        rating={"label": "DA"}, save_as=r"X\y.json"))
+    assert 'class="idchip"' in out
+    assert 'class="savebanner"' in out
+    # rating field must reach the strict payload's item constructor too
+    assert out.count("rating: (rec.rating == null ? null : rec.rating)") >= 2
+
+
+def test_mark_cyrillic_wraps_only_text_nodes():
+    from csl_pyutil import mark_cyrillic
+    out = mark_cyrillic('<span class="де">немецкое слово</span> and <b>вода</b> water')
+    assert '<mark class="hl">немецкое</mark>' in out
+    assert '<mark class="hl">слово</mark>' in out
+    assert '<mark class="hl">вода</mark>' in out
+    assert 'class="де"' in out  # attribute text untouched
+    assert "water" in out
