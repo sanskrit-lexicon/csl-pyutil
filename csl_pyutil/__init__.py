@@ -9,5 +9,5 @@ render_review_sheet(items, config, extras=True)   self-contained HTML review/
 """
 from csl_pyutil.review_sheet import render_review_sheet, esc, mark_cyrillic
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 __all__ = ["render_review_sheet", "esc", "mark_cyrillic"]
