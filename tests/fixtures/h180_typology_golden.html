@@ -2,9 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="color-scheme" content="dark">
 <title>H180 demo fixture — 2 items</title>
 <style>
-  :root { --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --text:#e6e6e6; --muted:#9aa0aa;
+  :root { color-scheme: dark; --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --text:#e6e6e6; --muted:#9aa0aa;
           --accent:#5b8cff; --ok:#3fb950; --bad:#f85149; --defer:#d29922; --border:#2a2f3a; }
   * { box-sizing: border-box; }
   body { background:var(--bg); color:var(--text); font-family:-apple-system,Segoe UI,Roboto,sans-serif;
@@ -48,9 +49,10 @@
   button.vote.reject.active { background:var(--bad); border-color:var(--bad); color:#2a0a08; }
   button.vote.defer.active { background:var(--defer); border-color:var(--defer); color:#2a1d02; }
   .vote-state { margin-left:6px; font-size:12px; color:var(--muted); }
-  textarea.note { width:100%; margin-top:10px; min-height:44px; background:#11141a; color:var(--text);
-                  border:1px solid var(--border); border-radius:6px; padding:8px; font-size:13px;
+  textarea.note { width:100%; margin-top:10px; min-height:44px; background:#11141a !important; color:#e6e6e6 !important;
+                  -webkit-text-fill-color:#e6e6e6; border:1px solid var(--border); border-radius:6px; padding:8px; font-size:13px;
                   font-family:inherit; resize:vertical; }
+  textarea.note::placeholder { color:var(--muted); opacity:1; }
   footer.hint { max-width:980px; margin:20px auto; padding:0 20px; color:var(--muted); font-size:12px; }
   kbd { background:#263042; border-radius:4px; padding:1px 5px; font-size:11px; }
 </style>

@@ -5,17 +5,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed — `csl_pyutil.__version__` still reported `0.2.0` on the 0.3.0 release
+## [0.3.1] - 2026-07-19
 
-The 0.3.0 release bumped `pyproject.toml` and `review_sheet.py`'s
-`__version__` but missed the shadow copy in `csl_pyutil/__init__.py`, which is
-the one consumers actually import (`from csl_pyutil import __version__`). Any
-downstream that pins the emitter by an equality guard — csl-atlas's
-`REQUIRED_EMITTER_VERSION` check in
-[`scripts/build-review-sheets.py`](https://github.com/sanskrit-lexicon/csl-atlas/blob/main/scripts/build-review-sheets.py)
-is the live case — could not express "require the V1–V8 standard": asking for
-`0.3.0` hard-failed against an installed, genuinely-0.3.0 package. Found
-19-07-2026 porting csl-atlas onto the standard (H1314).
+### Fixed
+
+- **Review sheets were unreadable in light-mode browsers/OS.** The template is
+  dark-themed but declared no `color-scheme`, so a light-mode browser rendered the
+  note `textarea` with a white native background while its text stayed light
+  (`#e6e6e6`) — invisible letters (reported live while voting on the H1323
+  ghost-word sheet). Added `<meta name="color-scheme" content="dark">` +
+  `:root { color-scheme: dark }`, and forced the textarea's dark background + light
+  text (`!important`, `-webkit-text-fill-color`, `::placeholder`) so it is readable
+  regardless of OS theme. Golden byte-identical fixture regenerated to match; the
+  `note_min_height_px` string-surgery contract is preserved.
+- **`csl_pyutil.__version__` still reported `0.2.0` on the 0.3.0 release** (folded in
+  from PR #5). The 0.3.0 release bumped `pyproject.toml` and `review_sheet.py`'s
+  `__version__` but missed the shadow copy in `csl_pyutil/__init__.py`, which is the one
+  consumers actually import (`from csl_pyutil import __version__`). Any downstream that
+  pins the emitter by an equality guard — csl-atlas's `REQUIRED_EMITTER_VERSION` check in
+  [`scripts/build-review-sheets.py`](https://github.com/sanskrit-lexicon/csl-atlas/blob/main/scripts/build-review-sheets.py)
+  is the live case — could not express "require the V1–V8 standard". `__init__.py`
+  `__version__` now tracks `pyproject.toml` and rides this 0.3.1 release.
 
 ## [0.3.0] - 2026-07-19
 
