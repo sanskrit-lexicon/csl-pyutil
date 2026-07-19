@@ -5,6 +5,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `csl_pyutil.__version__` still reported `0.2.0` on the 0.3.0 release
+
+The 0.3.0 release bumped `pyproject.toml` and `review_sheet.py`'s
+`__version__` but missed the shadow copy in `csl_pyutil/__init__.py`, which is
+the one consumers actually import (`from csl_pyutil import __version__`). Any
+downstream that pins the emitter by an equality guard — csl-atlas's
+`REQUIRED_EMITTER_VERSION` check in
+[`scripts/build-review-sheets.py`](https://github.com/sanskrit-lexicon/csl-atlas/blob/main/scripts/build-review-sheets.py)
+is the live case — could not express "require the V1–V8 standard": asking for
+`0.3.0` hard-failed against an installed, genuinely-0.3.0 package. Found
+19-07-2026 porting csl-atlas onto the standard (H1314).
+
 ## [0.3.0] - 2026-07-19
 
 ### Added — the 19-07-2026 review-sheet standard (V1–V8)
