@@ -136,7 +136,17 @@ evidence  : another demo evidence string</pre></div><div class="panel"><h4>Sub-c
     var ta = card.querySelector('textarea.note'); if (rec.note && !ta.value) ta.value = rec.note;
   }
   function save() { localStorage.setItem(STORE_KEY, JSON.stringify(state)); tally(); }
-  function vote(id, d) { state[id] = state[id] || {}; state[id].decision = d; save(); }
+  // H1523 residual / csl-pyutil#1 Part 1: always re-read the live textarea on vote
+  // and before export so a second vote click (or a missed `input` event) cannot
+  // drop a note that is still visible in the card.
+  function syncNoteFromDom(id) {
+    state[id] = state[id] || {};
+    var card = document.querySelector('.card[data-id="' + id + '"]');
+    if (!card) return;
+    var ta = card.querySelector('textarea.note');
+    if (ta) state[id].note = ta.value;
+  }
+  function vote(id, d) { syncNoteFromDom(id); state[id].decision = d; save(); }
   function noteChange(id, t) { state[id] = state[id] || {}; state[id].note = t; save(); }
   document.querySelectorAll('.card').forEach(function (card) {
     var id = card.getAttribute('data-id'); applyCardUI(card);
@@ -147,6 +157,7 @@ evidence  : another demo evidence string</pre></div><div class="panel"><h4>Sub-c
   });
   tally();
   document.getElementById('downloadBtn').addEventListener('click', function () {
+    ids.forEach(function (id) { syncNoteFromDom(id); });
     var decided = ids.filter(function (id) { return state[id] && state[id].decision; }).length;
     var payload = { sheet_id: SHEET_ID, generated: "2026-07-14", decided: decided,
       items: ids.map(function (id) { var rec = state[id] || {}; return { id: id, decision: rec.decision || null, note: rec.note || '' }; }) };

@@ -73,6 +73,14 @@ def test_decisions_json_contract_fields_present():
     assert "note: rec.note" in out
 
 
+def test_vote_syncs_note_from_dom_before_decision():
+    """csl-pyutil#1 Part 1 / H1523: second vote must not drop a live note."""
+    out = render_review_sheet(_items(), _config())
+    assert "function syncNoteFromDom(id)" in out
+    assert "syncNoteFromDom(id); state[id].decision = d" in out
+    assert 'ids.forEach(function (id) { syncNoteFromDom(id); });' in out
+
+
 def test_panels_and_badges_rendered():
     out = render_review_sheet(_items(), _config())
     assert "<h4>context</h4>" in out
