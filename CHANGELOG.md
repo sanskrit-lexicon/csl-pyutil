@@ -5,6 +5,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-07-23
+
+### Fixed
+
+- **Review-sheet note race on second vote (csl-pyutil#1 Part 1 / H1523 residual).**
+  `vote()` previously wrote only `decision` into `state[id]`. That preserved an
+  already-saved note, but a note still sitting only in the live `textarea` (missed
+  `input` event, paste edge, or a second vote before the last keystroke committed)
+  could export empty. `vote()` and the download path now re-read every card's
+  textarea via `syncNoteFromDom()` before mutating decision / building the payload.
+  `__version__` in `review_sheet.py` also re-synced to the package version (was
+  stuck at `0.3.0` after the 0.3.1 release).
+
 ## [0.3.1] - 2026-07-19
 
 ### Fixed

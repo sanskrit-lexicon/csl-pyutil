@@ -30,7 +30,7 @@ import html
 import json
 import re
 
-__version__ = "0.3.0"
+__version__ = "0.3.2"
 
 __all__ = ["render_review_sheet", "esc", "mark_cyrillic"]
 
@@ -169,7 +169,17 @@ _CORE_TEMPLATE = '''<!DOCTYPE html>
     var ta = card.querySelector('textarea.note'); if (rec.note && !ta.value) ta.value = rec.note;
   }
   function save() { localStorage.setItem(STORE_KEY, JSON.stringify(state)); tally(); }
-  function vote(id, d) { state[id] = state[id] || {}; state[id].decision = d; save(); }
+  // H1523 residual / csl-pyutil#1 Part 1: always re-read the live textarea on vote
+  // and before export so a second vote click (or a missed `input` event) cannot
+  // drop a note that is still visible in the card.
+  function syncNoteFromDom(id) {
+    state[id] = state[id] || {};
+    var card = document.querySelector('.card[data-id="' + id + '"]');
+    if (!card) return;
+    var ta = card.querySelector('textarea.note');
+    if (ta) state[id].note = ta.value;
+  }
+  function vote(id, d) { syncNoteFromDom(id); state[id].decision = d; save(); }
   function noteChange(id, t) { state[id] = state[id] || {}; state[id].note = t; save(); }
   document.querySelectorAll('.card').forEach(function (card) {
     var id = card.getAttribute('data-id'); applyCardUI(card);
@@ -180,6 +190,7 @@ _CORE_TEMPLATE = '''<!DOCTYPE html>
   });
   tally();
   document.getElementById('downloadBtn').addEventListener('click', function () {
+    ids.forEach(function (id) { syncNoteFromDom(id); });
     var decided = ids.filter(function (id) { return state[id] && state[id].decision; }).length;
     var payload = { sheet_id: SHEET_ID, generated: %(generated_json)s, decided: decided,
       items: ids.map(function (id) { var rec = state[id] || {}; return { id: id, decision: rec.decision || null, note: rec.note || '' }; }) };
@@ -285,6 +296,9 @@ _LEGEND_HTML = '''<div class="legend" style="max-width:980px;margin:0 auto 20px;
 _AUTOSAVE_JS = '''
   var saveHandle = null, saveTimer = null;
   function exportPayload() {
+    if (typeof syncNoteFromDom === 'function') {
+      ids.forEach(function (id) { syncNoteFromDom(id); });
+    }
     var decided = ids.filter(function (id) { return state[id] && state[id].decision; }).length;
     return JSON.stringify({ sheet_id: SHEET_ID, generated: new Date().toISOString(), decided: decided,
       items: ids.map(function (id) { var rec = state[id] || {}; return { id: id, decision: rec.decision || null, note: rec.note || '' }; }) }, null, 2);
@@ -312,6 +326,9 @@ _AUTOSAVE_JS = '''
 '''
 
 _AUTOSAVE_EXPORT_FUNCTION = '''  function exportPayload() {
+    if (typeof syncNoteFromDom === 'function') {
+      ids.forEach(function (id) { syncNoteFromDom(id); });
+    }
     var decided = ids.filter(function (id) { return state[id] && state[id].decision; }).length;
     return JSON.stringify({ sheet_id: SHEET_ID, generated: new Date().toISOString(), decided: decided,
       items: ids.map(function (id) { var rec = state[id] || {}; return { id: id, decision: rec.decision || null, note: rec.note || '' }; }) }, null, 2);
