@@ -5,6 +5,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-26
+
+### Added
+
+- **`config["ui_strings"]` — translate the emitter's own chrome (H1648).** A caller
+  could already set `title` / `subtitle` / `footer` / `approve_label` / `reject_label`,
+  but the toolbar button, keyboard hint, localStorage/export note, V8 save banner and
+  the H779 approve/reject/defer legend were hard-coded English. csl-atlas's xref sheet
+  is reviewed in Russian: its card content was fully translated while those five pieces
+  of chrome — all of them instructions the reviewer has to read — stayed English.
+  Localising by post-processing the emitted HTML in each caller would have copied the
+  same brittle literals into every repo, so the mapping lives here beside the strings.
+  Keys: `download_button`, `save_button`, `footer_hint`, `save_banner`, `legend`
+  (`UI_STRINGS` is the public roster). Unknown keys and non-string values raise; a key
+  whose chrome is absent from a given sheet (no `save_as`, `extras=False`) is skipped,
+  so one table can serve every sheet a repo emits. Applied as a final surgery pass in
+  the established `_add_extras` / `_add_standard` style — callers that pass nothing get
+  a byte-identical document, and the fixture contract is untouched.
+
 ## [0.3.2] - 2026-07-23
 
 ### Fixed
