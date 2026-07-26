@@ -30,7 +30,7 @@ import html
 import json
 import re
 
-__version__ = "0.3.2"
+__version__ = "0.4.0"
 
 __all__ = ["render_review_sheet", "esc", "mark_cyrillic"]
 
@@ -522,6 +522,76 @@ def _add_extras(doc):
     return doc
 
 
+#: The emitter's own chrome — the strings a caller cannot reach through `title` /
+#: `subtitle` / `footer` / `approve_label` / `reject_label`. Keys are stable
+#: identifiers; values are the English defaults as they appear in the rendered doc.
+#: A caller passes `config["ui_strings"] = {key: replacement}` to translate them.
+#:
+#: Added for H1648: csl-atlas's xref sheet is reviewed in Russian, and its card
+#: content was fully translated while the toolbar button, keyboard hint, save banner
+#: and vote legend stayed English — instructions the reviewer still has to read.
+#: Localising by post-processing the emitted HTML in each caller would put the same
+#: brittle literals in every repo, so the mapping lives here with the strings.
+#: Keys are stable identifiers; each maps to how that chrome is found in the rendered
+#: document. A plain string is a literal replaced everywhere it occurs. A compiled
+#: pattern must expose a ``body`` group — only that group is replaced, so the
+#: surrounding markup (the div, its inline style) survives untouched.
+UI_STRINGS = {
+    # Toolbar buttons — literal, and `download_button` deliberately also rewrites the
+    # quoted mention of the same label inside the footer hint.
+    "download_button": "Download decisions.json",
+    "save_button": "Save to folder…",
+    # Everything after the caller's own `footer` text, up to </footer>: the keyboard
+    # legend and the localStorage/export note.
+    "footer_hint": re.compile(r"(?P<body>Keyboard:.*?)(?=</footer>)", re.DOTALL),
+    # The V8 save-path banner body (present only when `save_as` is passed).
+    "save_banner": re.compile(
+        r'(?P<pre><div class="savebanner">)(?P<body>.*?)(?P<post></div>)', re.DOTALL),
+    # The H779 approve/reject/defer explanation (present only when extras=True).
+    "legend": re.compile(
+        r'(?P<pre><div class="legend" style="[^"]*">)(?P<body>.*?)(?P<post>\n</div>)', re.DOTALL),
+}
+
+
+def _localize(doc, ui_strings):
+    """Replace emitter chrome with caller-supplied translations.
+
+    Surgery on the finished document, in the same additive style as `_add_extras` /
+    `_add_standard`: a caller that passes nothing gets a byte-identical document, so the
+    fixture contract is untouched.
+
+    Unknown keys raise — a silently-ignored typo would ship an English string to a
+    reviewer who asked for a translated sheet, which is the exact failure this prevents.
+    A key whose chrome is absent from *this* sheet (no `save_as`, `extras=False`) is
+    skipped, so one translation table can serve every sheet a repo emits.
+    """
+    if not ui_strings:
+        return doc
+    if not isinstance(ui_strings, dict):
+        raise TypeError("ui_strings must be a mapping")
+    unknown = sorted(set(ui_strings) - set(UI_STRINGS))
+    if unknown:
+        raise ValueError(
+            "unknown ui_strings key(s): %s; known keys: %s"
+            % (", ".join(unknown), ", ".join(sorted(UI_STRINGS)))
+        )
+    for key, replacement in ui_strings.items():
+        if not isinstance(replacement, str):
+            raise TypeError("ui_strings[%r] must be a string" % key)
+        pattern = UI_STRINGS[key]
+        if isinstance(pattern, str):
+            doc = doc.replace(pattern, replacement)
+            continue
+
+        def _swap_body(match, _new=replacement):
+            text = match.group(0)
+            start, end = match.span("body")
+            return text[: start - match.start()] + _new + text[end - match.start():]
+
+        doc = pattern.sub(_swap_body, doc)
+    return doc
+
+
 def render_review_sheet(items, config, *, extras=True):
     """Build a self-contained HTML review/voting sheet.
 
@@ -627,4 +697,4 @@ def render_review_sheet(items, config, *, extras=True):
     if standard_on:
         doc = _add_standard(doc, save_as=save_as, sheet_id=config["sheet_id"],
                             note_min_height_px=note_min_height_px, rating=rating)
-    return doc
+    return _localize(doc, config.get("ui_strings"))

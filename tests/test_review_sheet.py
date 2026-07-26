@@ -222,3 +222,57 @@ def test_mark_cyrillic_wraps_only_text_nodes():
     assert '<mark class="hl">вода</mark>' in out
     assert 'class="де"' in out  # attribute text untouched
     assert "water" in out
+
+
+def test_ui_strings_absent_by_default_leaves_english_chrome():
+    out = render_review_sheet(_items(), _config())
+    assert "Download decisions.json" in out
+    assert "Keyboard:" in out
+
+
+def test_ui_strings_translates_chrome():
+    """H1648 — the reviewer of csl-atlas's xref sheet reads Russian; card content was
+    translated while the emitter's own chrome stayed English."""
+    out = render_review_sheet(_items(), _config(
+        save_as=r"csl-atlas\review\x_decisions.json",
+        ui_strings={
+            "download_button": "Скачать decisions.json",
+            "save_button": "Сохранить в папку…",
+            "footer_hint": "Клавиши: a — принять, r — отклонить, d — отложить.",
+            "save_banner": "Экспорт скачается как файл решений.",
+            "legend": "Принять — согласиться с карточкой. Отклонить — оставить как есть.",
+        }))
+    assert "Скачать decisions.json" in out
+    assert "Download decisions.json" not in out
+    assert "Сохранить в папку…" in out
+    assert "Клавиши: a — принять" in out
+    assert "Keyboard:" not in out
+    assert "Экспорт скачается как файл решений." in out
+    assert "Принять — согласиться с карточкой." in out
+    assert "not sure yet, decide later" not in out
+    # the surrounding markup the body sits in must survive
+    assert 'class="savebanner"' in out
+    assert 'class="legend"' in out
+    assert "</footer>" in out
+
+
+def test_ui_strings_skips_chrome_this_sheet_does_not_have():
+    """One translation table should serve every sheet a repo emits, including sheets
+    with no save banner."""
+    out = render_review_sheet(_items(), _config(
+        ui_strings={"save_banner": "неважно", "download_button": "Скачать"}))
+    assert "Скачать" in out
+    assert 'class="savebanner"' not in out
+
+
+def test_ui_strings_rejects_unknown_key():
+    import pytest
+    with pytest.raises(ValueError) as excinfo:
+        render_review_sheet(_items(), _config(ui_strings={"downlaod_button": "x"}))
+    assert "downlaod_button" in str(excinfo.value)
+
+
+def test_ui_strings_rejects_non_string_value():
+    import pytest
+    with pytest.raises(TypeError):
+        render_review_sheet(_items(), _config(ui_strings={"download_button": 5}))
