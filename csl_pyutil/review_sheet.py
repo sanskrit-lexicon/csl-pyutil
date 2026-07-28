@@ -30,7 +30,7 @@ import html
 import json
 import re
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 __all__ = ["render_review_sheet", "esc", "mark_cyrillic"]
 
@@ -234,15 +234,17 @@ _CORE_TEMPLATE = '''<!DOCTYPE html>
 '''
 
 
-def render_card(item, approve_label, reject_label, *, show_id=False, rating=None):
+def render_card(item, approve_label, reject_label, *, show_id=False, rating=None,
+                reject_labels=None):
     """Ported verbatim from build_h180_review_sheets.py — item shape:
     {"id", "filt", "title", "badges": [...], "question" (HTML), "panels":
     [(heading, html_body), ...], "note_placeholder" (optional), "title_href"
     (optional — V4 of the 19-07-2026 standard: the card header becomes a
     clickable link to the full source entry)}.
 
-    With ``show_id=False`` and ``rating=None`` and no ``title_href`` the
-    output is byte-identical to the v0.2.0 renderer (fixture contract)."""
+    With ``show_id=False``, ``rating=None``, ``reject_labels=None`` and no
+    ``title_href`` the output is byte-identical to the v0.2.0 renderer
+    (fixture contract)."""
     panels = "".join(
         '<div class="panel"><h4>%s</h4>%s</div>' % (esc(h4), body)
         for h4, body in item["panels"])
@@ -260,6 +262,17 @@ def render_card(item, approve_label, reject_label, *, show_id=False, rating=None
                        for v in range(1, rating["scale"] + 1))
         rating_row = ('\n    <div class="ratingrow"><span class="ratinglabel">%s</span>%s'
                       '<span class="rate-state">unrated</span></div>' % (esc(rating["label"]), btns))
+    reject_label_row = ""
+    if reject_labels:
+        options = "".join('<option value="%s">%s</option>' % (esc(v), esc(l))
+                          for v, l in reject_labels)
+        reject_label_row = (
+            '\n    <div class="rejectlabelrow" style="display:none;margin-top:8px">'
+            '<span class="rejectlabellabel" style="font-size:12px;color:var(--muted);'
+            'margin-right:6px">Reason</span>'
+            '<select class="reject-label-select" style="background:#11141a;color:var(--text);'
+            'border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px">'
+            '<option value="">— select —</option>%s</select></div>' % options)
     return '''
   <section class="card" data-id="%s" data-filt="%s">
     <header><div class="hw">%s %s</div>%s</header>
@@ -270,11 +283,11 @@ def render_card(item, approve_label, reject_label, *, show_id=False, rating=None
       <button class="vote reject" data-vote="reject">&#10060; %s</button>
       <button class="vote defer" data-vote="defer">&#9208; Defer</button>
       <span class="vote-state">unvoted</span>
-    </div>%s
+    </div>%s%s
     <textarea class="note" placeholder="%s"></textarea>
   </section>''' % (esc(item["id"]), esc(item["filt"]), title_html, badges, idchip,
                    item["question"], panels, esc(approve_label), esc(reject_label),
-                   rating_row,
+                   reject_label_row, rating_row,
                    esc(item.get("note_placeholder", "free-text note (optional)")))
 
 
@@ -488,6 +501,67 @@ def _rating_js(rating):
 ''' % json.dumps(rating)
 
 
+# ----------------------------------------------------------------------------- H1802 reject-label picker
+# The G6 MQM vote (H1796) showed 5/6 rejects failing to put the correct typology
+# label as the first word of the free-text note — an unenforceable prose
+# convention. This adds a config-driven required single-select control that
+# replaces the convention with an actual field, additive on the same stable
+# anchors as rating/standard, so a caller that passes nothing gets the
+# byte-identical pre-H1802 document.
+_REJECT_LABEL_ITEM_OLD = "{ id: id, decision: rec.decision || null, note: rec.note || '' }"
+_REJECT_LABEL_ITEM_NEW = ("{ id: id, decision: rec.decision || null, note: rec.note || '', "
+                          "reject_label: rec.reject_label || null }")
+_REJECT_LABEL_ITEM_WITH_RATING_OLD = _RATING_ITEM_NEW
+_REJECT_LABEL_ITEM_WITH_RATING_NEW = (
+    _RATING_ITEM_NEW[:-2] + ", reject_label: rec.reject_label || null }")
+
+
+def _reject_label_js(reject_labels):
+    return '''
+  var REJECT_LABELS = %s;
+  function applyRejectLabelUI(card) {
+    var row = card.querySelector('.rejectlabelrow'); if (!row) return;
+    var id = card.getAttribute('data-id'); var rec = state[id] || {};
+    row.style.display = rec.decision === 'reject' ? '' : 'none';
+    var sel = row.querySelector('select'); if (sel) sel.value = rec.reject_label || '';
+  }
+  function setRejectLabel(id, v) { state[id] = state[id] || {}; state[id].reject_label = v || null; save(); }
+  document.querySelectorAll('.card').forEach(function (card) {
+    var id = card.getAttribute('data-id');
+    var sel = card.querySelector('.rejectlabelrow select');
+    if (sel) sel.addEventListener('change', function () { setRejectLabel(id, sel.value); applyRejectLabelUI(card); });
+    applyRejectLabelUI(card);
+  });
+  var _origApplyCardUI = applyCardUI;
+  applyCardUI = function (card) { _origApplyCardUI(card); applyRejectLabelUI(card); };
+''' % json.dumps(reject_labels)
+
+
+def _add_reject_labels(doc, reject_labels, *, strict=False):
+    """Additive string surgery: item literals gain a ``reject_label`` field
+    (wherever the shared literal currently appears — plain export, autosave
+    export, and, when present, the strict-review item constructor); the
+    strict-review completion gate additionally refuses a labelless reject the
+    same way it already refuses a noteless one."""
+    doc = doc.replace(_REJECT_LABEL_ITEM_OLD, _REJECT_LABEL_ITEM_NEW)
+    doc = doc.replace(_REJECT_LABEL_ITEM_WITH_RATING_OLD, _REJECT_LABEL_ITEM_WITH_RATING_NEW)
+    doc = doc.replace("})();\n</script>", _reject_label_js(reject_labels) + "})();\n</script>", 1)
+    if strict:
+        anchor = ("    if (rejectedWithoutNote.length) errors.push(rejectedWithoutNote.length"
+                  " + ' rejection(s) need a note');\n")
+        if anchor not in doc:
+            raise ValueError("review-sheet strict-review anchor is missing")
+        addition = (
+            "    var rejectedWithoutLabel = STRICT_REVIEW.requireRejectNote ? items.filter(function (item) {\n"
+            "      return item.decision === 'reject' && !item.reject_label;\n"
+            "    }) : [];\n"
+            "    if (rejectedWithoutLabel.length) errors.push(rejectedWithoutLabel.length"
+            " + ' rejection(s) need a label');\n"
+        )
+        doc = doc.replace(anchor, anchor + addition, 1)
+    return doc
+
+
 def _add_standard(doc, *, save_as=None, sheet_id=None, note_min_height_px=None, rating=None):
     """Apply the 19-07-2026 standard layers. Each is independent surgery on a
     stable core-template anchor; nothing here touches _CORE_TEMPLATE itself."""
@@ -637,6 +711,17 @@ def render_review_sheet(items, config, *, extras=True):
       in ``<mark class="hl">``; the matching style ships with the standard
       CSS (always included once any standard option is active).
 
+    config["reject_labels"]: optional ordered list of ``(value, human_label)``
+        pairs (H1802). When present, choosing *reject* on a card reveals a
+        required single-select control (the note textarea stays, for the
+        rationale). Each exported item gains a ``reject_label`` field
+        (``"<value>"`` or ``null``); ``note`` is left untouched. With
+        ``strict_review`` on and ``require_reject_note`` true, a reject with
+        no ``reject_label`` blocks the export the same way a missing note
+        does. Replaces the unenforceable "correct label as the first word of
+        the note" convention (measured 83% non-compliant on the first real
+        G6 vote, H1796) with an actual control.
+
     Returns the full HTML document as a string.
     """
     show_ids = bool(config.get("show_ids", False))
@@ -654,10 +739,19 @@ def render_review_sheet(items, config, *, extras=True):
             raise ValueError("rating threshold/approve_min must lie within 1..scale")
     save_as = config.get("save_as")
     note_min_height_px = config.get("note_min_height_px")
+    reject_labels = config.get("reject_labels")
+    if reject_labels is not None:
+        reject_labels = [(str(v), str(l)) for v, l in reject_labels]
+        if not reject_labels:
+            raise ValueError("reject_labels must be a non-empty list of (value, label) pairs")
+        values = [v for v, _ in reject_labels]
+        if len(set(values)) != len(values):
+            raise ValueError("reject_labels values must be unique")
     standard_on = bool(show_ids or rating is not None or save_as or note_min_height_px is not None
                        or any(it.get("title_href") for it in items))
     cards = "\n".join(render_card(it, config["approve_label"], config["reject_label"],
-                                  show_id=show_ids, rating=rating) for it in items)
+                                  show_id=show_ids, rating=rating, reject_labels=reject_labels)
+                      for it in items)
     filters = ('<button data-filter="all" class="active">all</button>'
                + "".join('<button data-filter="%s">%s</button>' % (esc(k), esc(l))
                          for k, l in config["filters"])
@@ -675,8 +769,10 @@ def render_review_sheet(items, config, *, extras=True):
         raise ValueError("strict_review requires extras=True")
     if not extras:
         if standard_on:
-            return _add_standard(doc, save_as=save_as, sheet_id=config["sheet_id"],
-                                 note_min_height_px=note_min_height_px, rating=rating)
+            doc = _add_standard(doc, save_as=save_as, sheet_id=config["sheet_id"],
+                                note_min_height_px=note_min_height_px, rating=rating)
+        if reject_labels:
+            doc = _add_reject_labels(doc, reject_labels, strict=False)
         return doc
 
     doc = _add_extras(doc)
@@ -697,4 +793,6 @@ def render_review_sheet(items, config, *, extras=True):
     if standard_on:
         doc = _add_standard(doc, save_as=save_as, sheet_id=config["sheet_id"],
                             note_min_height_px=note_min_height_px, rating=rating)
+    if reject_labels:
+        doc = _add_reject_labels(doc, reject_labels, strict=strict is not None)
     return _localize(doc, config.get("ui_strings"))
