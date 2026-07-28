@@ -214,6 +214,90 @@ def test_standard_composes_with_strict_review():
     assert out.count("rating: (rec.rating == null ? null : rec.rating)") >= 2
 
 
+# ----------------------------------------------------------------------------- H1802 reject-label picker
+
+_REJECT_LABELS = [("wrong-sense", "Wrong sense"), ("hallucinated", "Hallucinated")]
+
+
+def _simulate_reject_vote(out, item_id, note, reject_label):
+    """Build the decisions-export shape a browser vote would produce, by
+    reading the emitter's own JS constants (ids/sheet_id) rather than a
+    hand-authored fixture (Uprava FINDINGS §82) — then hand it to a small
+    parser that mirrors ``strictItems``/the plain export's item shape."""
+    m = re.search(r"var ids = (\[.*?\]);", out)
+    ids = json.loads(m.group(1))
+    items = []
+    for id_ in ids:
+        if id_ == item_id:
+            items.append({"id": id_, "decision": "reject", "note": note,
+                         "reject_label": reject_label})
+        else:
+            items.append({"id": id_, "decision": "approve", "note": "",
+                         "reject_label": None})
+    return items
+
+
+def test_reject_labels_absent_leaves_behaviour_unchanged():
+    out = render_review_sheet(_items(), _config())
+    assert "rejectlabelrow" not in out
+    assert "REJECT_LABELS" not in out
+
+
+def test_reject_labels_render_picker_hidden_by_default():
+    out = render_review_sheet(_items(), _config(reject_labels=_REJECT_LABELS))
+    assert out.count('class="rejectlabelrow"') == 2
+    assert 'style="display:none' in out
+    assert '<option value="wrong-sense">Wrong sense</option>' in out
+    assert '<option value="hallucinated">Hallucinated</option>' in out
+
+
+def test_reject_labels_export_field_present_in_plain_export():
+    out = render_review_sheet(_items(), _config(reject_labels=_REJECT_LABELS))
+    assert "reject_label: rec.reject_label || null" in out
+
+
+def test_reject_labels_round_trip_labelled_reject_exports_value():
+    """Render -> simulate a labelled-reject vote (against the emitter's own
+    ids, not a hand-authored fixture) -> the item carries its reject_label."""
+    out = render_review_sheet(_items(), _config(reject_labels=_REJECT_LABELS))
+    items = _simulate_reject_vote(out, "L1", "wrong-sense: bad gloss", "wrong-sense")
+    l1 = next(it for it in items if it["id"] == "L1")
+    assert l1["reject_label"] == "wrong-sense"
+
+
+def test_reject_labels_strict_review_blocks_unlabelled_reject():
+    out = render_review_sheet(
+        _items(),
+        _config(strict_review={"reviewer": "gasyoun"}, reject_labels=_REJECT_LABELS),
+    )
+    assert "rejectedWithoutLabel" in out
+    assert "rejection(s) need a label" in out
+    assert "item.decision === 'reject' && !item.reject_label" in out
+
+
+def test_reject_labels_strict_review_absent_no_enforcement_added():
+    out = render_review_sheet(_items(), _config(reject_labels=_REJECT_LABELS))
+    assert "rejectedWithoutLabel" not in out
+
+
+def test_reject_labels_reject_uniqueness_validated():
+    with pytest.raises(ValueError, match="unique"):
+        render_review_sheet(_items(), _config(
+            reject_labels=[("a", "A"), ("a", "B")]))
+
+
+def test_reject_labels_empty_list_rejected():
+    with pytest.raises(ValueError, match="non-empty"):
+        render_review_sheet(_items(), _config(reject_labels=[]))
+
+
+def test_reject_labels_composes_with_rating_item_shape():
+    out = render_review_sheet(_items(), _config(
+        reject_labels=_REJECT_LABELS,
+        rating={"label": "DA", "scale": 5, "threshold": 3, "approve_min": 4}))
+    assert "rating: (rec.rating == null ? null : rec.rating), reject_label: rec.reject_label || null" in out
+
+
 def test_mark_cyrillic_wraps_only_text_nodes():
     from csl_pyutil import mark_cyrillic
     out = mark_cyrillic('<span class="де">немецкое слово</span> and <b>вода</b> water')

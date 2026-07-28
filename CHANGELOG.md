@@ -5,6 +5,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-28
+
+### Added
+
+- **`config["reject_labels"]` — a required typology-label control on reject (H1802).**
+  The G6 MQM contract asked reviewers to write the correct typology label as the
+  first word of the free-text note; `strict_review` could require a note on reject
+  but not its *shape*. Measured on the first real G6 vote (H1796): 5 of 6 rejects
+  were prose, and the consumer's all-or-nothing apply meant all 20 votes — including
+  14 clean approves — failed to apply. `reject_labels` is an ordered list of
+  `(value, human_label)` pairs; when present, choosing *reject* on a card reveals a
+  required single-select control (the note textarea stays, for the rationale).
+  Absent, behaviour is unchanged. Each exported item gains a `reject_label` field
+  (`"<value>"`/`null`); `note` is left untouched so `apply_decisions.py` can still
+  read the legacy first-token convention on already-exported sheets. With
+  `strict_review.require_reject_note` on, a reject with no `reject_label` blocks
+  the export the same way a missing note does. Additive string surgery on the same
+  stable anchors as `rating`/`standard` — a caller that passes nothing gets a
+  byte-identical document.
+
 ## [0.4.0] - 2026-07-26
 
 ### Added
