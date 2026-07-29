@@ -456,6 +456,84 @@ _STANDARD_CSS = '''  .idchip { font-family:ui-monospace,Consolas,monospace; font
   .rate-state { font-size:12px; color:var(--muted); margin-left:4px; }
 '''
 
+#: Type scale (H1808). MG, voting the G5 batch1v3 sheet 28-07-2026: "increase
+#: fonts by default +150%%". The donor template's sizes were tuned for a dense
+#: 2026-07 sheet and inverted the hierarchy — ``.panel pre``, the text actually
+#: under judgement, was the SMALLEST type on the page (12px) while uppercase
+#: panel labels and chrome took the visual weight. So this layer does two things:
+#:
+#: 1. routes every size through one ``--fs`` multiplier (default 1.5), which the
+#:    A−/A+ control below re-points at runtime — one variable, whole page follows;
+#: 2. lifts ``.panel pre`` off the floor (12 -> 13.5 base) so the judged text is
+#:    the largest body type on a card, not the smallest.
+#:
+#: ``!important`` is deliberate, not cargo: the H779 legend and the H1646 anatomy
+#: block carry INLINE ``font-size``/``font`` declarations, which a plain class
+#: rule cannot outrank. One authoritative scale layer beats chasing each caller.
+_FONT_SCALE_CSS = '''  :root { --fs:%(fs)s; }
+  header.top h1 { font-size:calc(16px * var(--fs)) !important; }
+  header.top .sub { font-size:calc(12px * var(--fs)) !important; }
+  .tally, button.dl, button.vote, button.rate, textarea.note, .reject-label-select,
+  #strictReviewerWrap, #strictReviewerWrap input { font-size:calc(13px * var(--fs)) !important; }
+  .filterbar button, .fsctl button, .fsctl .fsval, .chip, .vote-state, .rate-state,
+  .ratinglabel, .rejectlabellabel, footer.hint, div.legend,
+  #strictReviewError { font-size:calc(12px * var(--fs)) !important; }
+  .card .hw { font-size:calc(18px * var(--fs)) !important; }
+  .badge, .panel h4, kbd, .idchip { font-size:calc(11px * var(--fs)) !important; }
+  .question { font-size:calc(14px * var(--fs)) !important; }
+  .panel { font-size:calc(13px * var(--fs)) !important; }
+  .panel pre { font-size:calc(13.5px * var(--fs)) !important; line-height:1.55; }
+  .panel .anatomy { font-size:calc(12.5px * var(--fs)) !important; }
+  .savebanner { font-size:calc(12.5px * var(--fs)) !important; }
+  .fsctl { display:flex; align-items:center; gap:4px; }
+  .fsctl button { background:var(--panel2); border:1px solid var(--border); color:var(--text);
+                  padding:6px 10px; border-radius:14px; cursor:pointer; line-height:1; }
+  .fsctl .fsval { color:var(--muted); min-width:3.4em; text-align:center; }
+'''
+
+_FONT_SCALE_HTML = ('<div class="fsctl" title="text size — persists in this browser">'
+                    '<button type="button" id="fsDown" aria-label="smaller text">A&minus;</button>'
+                    '<span class="fsval" id="fsVal"></span>'
+                    '<button type="button" id="fsUp" aria-label="larger text">A+</button></div>\n  ')
+
+_FONT_SCALE_JS = '''
+  var FS_KEY = STORE_KEY + ':fs', FS_DEFAULT = %(fs)s;
+  function fsGet() {
+    var v = parseFloat(localStorage.getItem(FS_KEY));
+    return (isFinite(v) && v >= 0.7 && v <= 3) ? v : FS_DEFAULT;
+  }
+  function fsApply(v) {
+    document.documentElement.style.setProperty('--fs', String(v));
+    document.getElementById('fsVal').textContent = Math.round(v * 100) + '%%';
+  }
+  function fsSet(v) {
+    v = Math.min(3, Math.max(0.7, Math.round(v * 10) / 10));
+    localStorage.setItem(FS_KEY, String(v)); fsApply(v);
+  }
+  fsApply(fsGet());
+  document.getElementById('fsDown').addEventListener('click', function () { fsSet(fsGet() - 0.1); });
+  document.getElementById('fsUp').addEventListener('click', function () { fsSet(fsGet() + 0.1); });
+'''
+
+
+def _add_font_scale(doc, scale):
+    """Scale layer + the A−/A+ toolbar control. Appended after the core template,
+    so _CORE_TEMPLATE (and its byte-identical fixture) stays untouched."""
+    doc = doc.replace("</style>", _FONT_SCALE_CSS % {"fs": ("%g" % scale)} + "</style>", 1)
+    anchor = '<div class="filterbar"'
+    if anchor not in doc:
+        raise ValueError("review-sheet filterbar anchor is missing")
+    doc = doc.replace(anchor, _FONT_SCALE_HTML + anchor, 1)
+    return doc.replace("})();\n</script>",
+                       _FONT_SCALE_JS % {"fs": ("%g" % scale)} + "})();\n</script>", 1)
+
+
+def _add_extra_css(doc, css):
+    """Caller-supplied CSS, last in the cascade. Its absence is why
+    csl-atlas's cdsl_anatomy had to inline every colour (H1646)."""
+    return doc.replace("</style>", "  /* caller css */\n" + css.rstrip() + "\n</style>", 1)
+
+
 _RATING_ITEM_OLD = "{ id: id, decision: rec.decision || null, note: rec.note || '' }"
 _RATING_ITEM_NEW = ("{ id: id, decision: rec.decision || null, note: rec.note || '', "
                     "rating: (rec.rating == null ? null : rec.rating) }")
@@ -721,6 +799,15 @@ def render_review_sheet(items, config, *, extras=True):
         does. Replaces the unenforceable "correct label as the first word of
         the note" convention (measured 83% non-compliant on the first real
         G6 vote, H1796) with an actual control.
+    Presentation (H1808, ``extras=True`` only — ``extras=False`` stays a
+    byte-faithful donor shell):
+
+    - ``config["font_scale"]``: multiplier over the whole type scale, default
+      **1.5** (MG 28-07-2026, "+150%"), plus an A−/A+ toolbar control that
+      re-points it per browser. ``1`` restores the donor sizes exactly.
+    - ``config["extra_css"]``: caller CSS appended last in the cascade. Its
+      absence is why csl-atlas's anatomy helper had to inline every colour
+      (H1646); ``csl_pyutil.anatomy`` now ships its stylesheet through here.
 
     Returns the full HTML document as a string.
     """
@@ -747,6 +834,14 @@ def render_review_sheet(items, config, *, extras=True):
         values = [v for v, _ in reject_labels]
         if len(set(values)) != len(values):
             raise ValueError("reject_labels values must be unique")
+    font_scale = config.get("font_scale", 1.5)
+    if not isinstance(font_scale, (int, float)) or isinstance(font_scale, bool):
+        raise TypeError("font_scale must be a number")
+    if not (0.7 <= float(font_scale) <= 3):
+        raise ValueError("font_scale must lie within 0.7..3")
+    extra_css = config.get("extra_css")
+    if extra_css is not None and not isinstance(extra_css, str):
+        raise TypeError("extra_css must be a string")
     standard_on = bool(show_ids or rating is not None or save_as or note_min_height_px is not None
                        or any(it.get("title_href") for it in items))
     cards = "\n".join(render_card(it, config["approve_label"], config["reject_label"],
@@ -768,6 +863,7 @@ def render_review_sheet(items, config, *, extras=True):
     if not extras and config.get("strict_review") is not None:
         raise ValueError("strict_review requires extras=True")
     if not extras:
+        # Donor-parity mode: no scale layer, no caller CSS — see the fixture test.
         if standard_on:
             doc = _add_standard(doc, save_as=save_as, sheet_id=config["sheet_id"],
                                 note_min_height_px=note_min_height_px, rating=rating)
@@ -795,4 +891,7 @@ def render_review_sheet(items, config, *, extras=True):
                             note_min_height_px=note_min_height_px, rating=rating)
     if reject_labels:
         doc = _add_reject_labels(doc, reject_labels, strict=strict is not None)
+    doc = _add_font_scale(doc, float(font_scale))
+    if extra_css:
+        doc = _add_extra_css(doc, extra_css)
     return _localize(doc, config.get("ui_strings"))
