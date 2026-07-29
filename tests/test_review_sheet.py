@@ -414,3 +414,119 @@ def test_extra_css_lands_last_in_the_cascade():
 def test_extra_css_rejects_non_string():
     with pytest.raises(TypeError):
         render_review_sheet(_items(), _config(extra_css=[".x{}"]))
+
+
+# --------------------------------------------------------------- H1847: faceted browse
+
+_FACETS = [
+    {"key": "diasystem", "label": "Диасистема",
+     "values": [("Ved", "Ved · 14188"), ("Śā", "Śā · 11349")]},
+    {"key": "position", "label": "Позиция", "values": [("ifc", "ifc"), ("Bhvr", "Bhvr")]},
+]
+
+
+def _faceted_items():
+    items = _items()
+    items[0]["facets"] = {"diasystem": ["Ved"], "position": ["ifc", "Bhvr"]}
+    items[1]["facets"] = {"diasystem": ["Śā"]}
+    return items
+
+
+def test_facets_absent_leaves_document_untouched():
+    out = render_review_sheet(_items(), _config())
+    assert "facetbar" not in out
+    assert "data-facets" not in out
+    assert "facetSel" not in out
+
+
+def test_facets_render_bar_and_per_card_values():
+    out = render_review_sheet(_faceted_items(), _config(facets=_FACETS))
+    assert 'id="facetbar"' in out
+    assert 'data-facet-key="diasystem" data-facet-val="Ved"' in out
+    assert "Ved · 14188" in out            # the count rides in the caller's label
+    assert 'data-facet-key="position" data-facet-val="Bhvr"' in out
+    # a card's own values, JSON-encoded in one attribute
+    assert "&quot;diasystem&quot;: [&quot;Ved&quot;]" in out
+    assert "&quot;position&quot;: [&quot;ifc&quot;, &quot;Bhvr&quot;]" in out
+
+
+def test_facets_bar_sits_above_the_cards_not_inside_them():
+    out = render_review_sheet(_faceted_items(), _config(facets=_FACETS))
+    assert out.index('id="facetbar"') < out.index('<main id="cards">')
+
+
+def test_facets_intersect_across_dimensions_and_union_within_one():
+    """AND across dimensions, OR within one — the whole point of the layer."""
+    out = render_review_sheet(_faceted_items(), _config(facets=_FACETS))
+    assert "function facetMatches(card)" in out
+    assert "if (!want || !want.length) continue;" in out       # unselected dim = no constraint
+    assert "if (!hit) return false;" in out                    # every selected dim must hit
+
+
+def test_facets_recompute_after_the_core_filter_bar_runs():
+    """Two writers to card.style.display would fight; the facet listener is
+    registered later so it re-applies the intersection last."""
+    out = render_review_sheet(_faceted_items(), _config(facets=_FACETS))
+    assert "document.getElementById('filterbar').addEventListener('click', function () { facetApply(); });" in out
+    assert out.index("var filterbar = document.getElementById('filterbar');") < out.index("function facetApply()")
+
+
+def test_facets_count_and_reset_labels_are_translatable():
+    out = render_review_sheet(_faceted_items(), _config(
+        facets=_FACETS, facet_count_label="показано {shown} из {total}",
+        facet_reset_label="сбросить"))
+    assert "показано {shown} из {total}" in out
+    assert ">сбросить<" in out
+    assert "showing {shown} of {total}" not in out
+
+
+def test_facets_default_labels_are_english():
+    out = render_review_sheet(_faceted_items(), _config(facets=_FACETS))
+    assert "showing {shown} of {total}" in out
+    assert ">clear facets<" in out
+
+
+def test_facets_accept_triples_and_bare_values():
+    out = render_review_sheet(_faceted_items(), _config(
+        facets=[("diasystem", "Диасистема", ["Ved", "Śā"])]))
+    assert 'data-facet-val="Ved">Ved<' in out
+
+
+def test_facets_scale_with_the_font_control():
+    """The facet chips follow A−/A+ like every other control, and their rules
+    land after the scale layer so they win without fighting it."""
+    out = render_review_sheet(_faceted_items(), _config(facets=_FACETS))
+    assert ".facetbar button { background:var(--panel2)" in out
+    assert out.count("font-size:calc(12px * var(--fs));") >= 4
+    assert out.index("--fs:1.5;") < out.index(".facetbar {")
+
+
+def test_facets_require_extras():
+    with pytest.raises(ValueError, match="requires extras=True"):
+        render_review_sheet(_faceted_items(), _config(facets=_FACETS), extras=False)
+
+
+def test_facets_validation():
+    with pytest.raises(ValueError, match="non-empty"):
+        render_review_sheet(_items(), _config(facets=[]))
+    with pytest.raises(ValueError, match="needs a key"):
+        render_review_sheet(_items(), _config(facets=[{"label": "x", "values": ["a"]}]))
+    with pytest.raises(ValueError, match="unique"):
+        render_review_sheet(_items(), _config(facets=[
+            {"key": "d", "values": ["a"]}, {"key": "d", "values": ["b"]}]))
+    with pytest.raises(ValueError, match="at least one value"):
+        render_review_sheet(_items(), _config(facets=[{"key": "d", "values": []}]))
+    with pytest.raises(ValueError, match="values must be unique"):
+        render_review_sheet(_items(), _config(facets=[{"key": "d", "values": ["a", "a"]}]))
+    with pytest.raises(TypeError, match="mapping or a"):
+        render_review_sheet(_items(), _config(facets=["diasystem"]))
+
+
+def test_facets_compose_with_strict_review_and_rating():
+    out = render_review_sheet(_faceted_items(), _config(
+        facets=_FACETS, strict_review={"reviewer": "MG"},
+        rating={"label": "DA", "scale": 5, "threshold": 3, "approve_min": 4}))
+    assert 'id="facetbar"' in out
+    assert 'id="strictReviewer"' in out
+    assert out.count('class="ratingrow"') == 2
+    assert out.count("<script>") == out.count("</script>")

@@ -30,7 +30,7 @@ import html
 import json
 import re
 
-__version__ = "0.5.0"
+__version__ = "0.7.0"
 
 __all__ = ["render_review_sheet", "esc", "mark_cyrillic"]
 
@@ -273,8 +273,19 @@ def render_card(item, approve_label, reject_label, *, show_id=False, rating=None
             '<select class="reject-label-select" style="background:#11141a;color:var(--text);'
             'border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px">'
             '<option value="">— select —</option>%s</select></div>' % options)
+    # H1847: a card's facet values ride as one JSON attribute rather than N
+    # `data-facet-<key>` attributes — dimensions are caller-defined, and a
+    # multi-valued dimension (a card carrying both `ifc` and `Bhvr`) has no
+    # honest single-attribute encoding. Absent key => attribute absent => the
+    # pre-H1847 byte-identical card.
+    facet_attr = ""
+    if item.get("facets"):
+        facet_attr = " data-facets=\"%s\"" % esc(
+            json.dumps({str(k): [str(v) for v in vals]
+                        for k, vals in item["facets"].items()},
+                       ensure_ascii=False, sort_keys=True))
     return '''
-  <section class="card" data-id="%s" data-filt="%s">
+  <section class="card" data-id="%s" data-filt="%s"%s>
     <header><div class="hw">%s %s</div>%s</header>
     <div class="question">%s</div>
     %s
@@ -285,7 +296,7 @@ def render_card(item, approve_label, reject_label, *, show_id=False, rating=None
       <span class="vote-state">unvoted</span>
     </div>%s%s
     <textarea class="note" placeholder="%s"></textarea>
-  </section>''' % (esc(item["id"]), esc(item["filt"]), title_html, badges, idchip,
+  </section>''' % (esc(item["id"]), esc(item["filt"]), facet_attr, title_html, badges, idchip,
                    item["question"], panels, esc(approve_label), esc(reject_label),
                    reject_label_row, rating_row,
                    esc(item.get("note_placeholder", "free-text note (optional)")))
@@ -526,6 +537,169 @@ def _add_font_scale(doc, scale):
     doc = doc.replace(anchor, _FONT_SCALE_HTML + anchor, 1)
     return doc.replace("})();\n</script>",
                        _FONT_SCALE_JS % {"fs": ("%g" % scale)} + "})();\n</script>", 1)
+
+
+# ----------------------------------------------------------------------------- H1847 facets
+# The core filter bar is ONE dimension, single-select (`data-filt`) — enough for
+# a stratum, useless for browsing by a tag vocabulary. The G5 sheet's cards carry
+# NWS sense tags in three independent slots (diasystem × domain × position in the
+# compound), and the census that measured them (SanskritLexicography
+# `src/nws_tag_census.py`, 48,214 senses) ends by noting that a reviewer deciding
+# whether a tag is worth a facet needs its counts — i.e. the census's own point
+# was to feed a facet bar that did not exist yet.
+#
+# So: N caller-defined dimensions, multi-select WITHIN a dimension (OR) and
+# intersected ACROSS dimensions (AND) — «все ведийские смыслы, стоящие в конце
+# сложного слова» is one click each, not a scroll. Additive on the same stable
+# anchors as every other layer; a caller that passes no `facets` gets the
+# byte-identical pre-H1847 document.
+#: Sizes route through the same `--fs` multiplier as the rest of the page — the
+#: layer is injected AFTER `_add_font_scale`, so these land later in the cascade
+#: and outrank it, which is why they can use `var(--fs)` without `!important`
+#: chasing. Keeping them here (not in the always-emitted scale layer) is what
+#: makes a facet-less sheet byte-identical to the pre-H1847 document.
+_FACET_CSS = '''  .facetbar { max-width:980px; margin:0 auto; padding:4px 20px 0;
+              font-size:calc(12px * var(--fs)); }
+  .facetrow { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; margin-bottom:6px; }
+  .facetrow .facetlabel { color:var(--muted); min-width:9em; font-size:calc(12px * var(--fs)); }
+  .facetbar button { background:var(--panel2); border:1px solid var(--border); color:var(--text);
+                     padding:4px 9px; border-radius:14px; cursor:pointer;
+                     font-size:calc(12px * var(--fs)); }
+  .facetbar button.active { border-color:var(--accent); color:var(--accent); }
+  .facetbar button.facetreset { border-style:dashed; }
+  .facetcount { color:var(--muted); padding:2px 0 6px; font-size:calc(12px * var(--fs)); }
+'''
+
+
+def _facet_html(facets, count_label, reset_label):
+    rows = []
+    for dim in facets:
+        chips = "".join(
+            '<button type="button" data-facet-key="%s" data-facet-val="%s">%s</button>'
+            % (esc(dim["key"]), esc(v), esc(l)) for v, l in dim["values"])
+        rows.append('<div class="facetrow"><span class="facetlabel">%s</span>%s</div>'
+                    % (esc(dim["label"]), chips))
+    reset = ('<div class="facetrow"><span class="facetlabel"></span>'
+             '<button type="button" class="facetreset" data-facet-reset="1">%s</button>'
+             '<span class="facetcount" id="facetcount"></span></div>' % esc(reset_label))
+    return ('<div class="facetbar" id="facetbar">\n  %s\n  %s\n</div>\n'
+            % ("\n  ".join(rows), reset))
+
+
+def _facet_js(count_label):
+    return '''
+  var FACET_COUNT = %s;
+  var facetSel = {};
+  function facetBaseVisible(card) {
+    var bar = document.getElementById('filterbar');
+    var act = bar ? bar.querySelector('button.active') : null;
+    var f = act ? act.getAttribute('data-filter') : 'all';
+    if (f === 'unvoted') { var id = card.getAttribute('data-id'); return !(state[id] && state[id].decision); }
+    if (f && f !== 'all') { return card.getAttribute('data-filt') === f; }
+    return true;
+  }
+  function facetCardValues(card) {
+    var raw = card.getAttribute('data-facets');
+    if (!raw) return {};
+    try { return JSON.parse(raw) || {}; } catch (e) { return {}; }
+  }
+  function facetMatches(card) {
+    var have = facetCardValues(card);
+    for (var k in facetSel) {
+      if (!Object.prototype.hasOwnProperty.call(facetSel, k)) continue;
+      var want = facetSel[k];
+      if (!want || !want.length) continue;
+      var mine = have[k] || [];
+      var hit = false;
+      for (var i = 0; i < want.length; i++) { if (mine.indexOf(want[i]) !== -1) { hit = true; break; } }
+      if (!hit) return false;
+    }
+    return true;
+  }
+  function facetApply() {
+    var shown = 0;
+    document.querySelectorAll('.card').forEach(function (card) {
+      var show = facetBaseVisible(card) && facetMatches(card);
+      card.style.display = show ? '' : 'none';
+      if (show) shown++;
+    });
+    var out = document.getElementById('facetcount');
+    if (out) out.textContent = FACET_COUNT.replace('{shown}', shown).replace('{total}', ids.length);
+    activeIdx = 0;
+  }
+  var facetbar = document.getElementById('facetbar');
+  facetbar.addEventListener('click', function (e) {
+    var reset = e.target.closest('button[data-facet-reset]');
+    if (reset) {
+      facetSel = {};
+      facetbar.querySelectorAll('button[data-facet-key]').forEach(function (b) { b.classList.remove('active'); });
+      facetApply();
+      return;
+    }
+    var btn = e.target.closest('button[data-facet-key]'); if (!btn) return;
+    var k = btn.getAttribute('data-facet-key'), v = btn.getAttribute('data-facet-val');
+    facetSel[k] = facetSel[k] || [];
+    var at = facetSel[k].indexOf(v);
+    if (at === -1) { facetSel[k].push(v); btn.classList.add('active'); }
+    else { facetSel[k].splice(at, 1); btn.classList.remove('active'); }
+    facetApply();
+  });
+  // The core filter bar writes card.style.display from ONE dimension; this
+  // listener is registered later, so it runs after and re-applies the
+  // intersection instead of letting the two writers fight.
+  document.getElementById('filterbar').addEventListener('click', function () { facetApply(); });
+  facetApply();
+''' % json.dumps(count_label, ensure_ascii=False)
+
+
+def _normalize_facets(facets):
+    """Validate + normalize the caller's facet dimensions to
+    ``[{"key", "label", "values": [(value, label), ...]}]``. ``None`` passes
+    through, so the whole layer stays opt-in."""
+    if facets is None:
+        return None
+    if not isinstance(facets, (list, tuple)) or not facets:
+        raise ValueError("facets must be a non-empty list of dimensions")
+    out, seen = [], set()
+    for dim in facets:
+        if isinstance(dim, dict):
+            key, label, values = dim.get("key"), dim.get("label"), dim.get("values")
+        else:
+            try:
+                key, label, values = dim
+            except (TypeError, ValueError):
+                raise TypeError("each facet must be a mapping or a (key, label, values) triple")
+        if not key:
+            raise ValueError("every facet dimension needs a key")
+        key = str(key)
+        if key in seen:
+            raise ValueError("facet keys must be unique; %r repeats" % key)
+        seen.add(key)
+        if not values:
+            raise ValueError("facet %r must list at least one value" % key)
+        pairs, vseen = [], set()
+        for v in values:
+            if isinstance(v, (list, tuple)):
+                val, vlabel = (list(v) + [None])[:2]
+            else:
+                val, vlabel = v, None
+            val = str(val)
+            if val in vseen:
+                raise ValueError("facet %r values must be unique; %r repeats" % (key, val))
+            vseen.add(val)
+            pairs.append((val, str(vlabel) if vlabel is not None else val))
+        out.append({"key": key, "label": str(label if label is not None else key),
+                    "values": pairs})
+    return out
+
+
+def _add_facets(doc, facets, count_label, reset_label):
+    doc = doc.replace("</style>", _FACET_CSS + "</style>", 1)
+    anchor = '<main id="cards">'
+    if anchor not in doc:
+        raise ValueError("review-sheet cards anchor is missing")
+    doc = doc.replace(anchor, _facet_html(facets, count_label, reset_label) + anchor, 1)
+    return doc.replace("})();\n</script>", _facet_js(count_label) + "})();\n</script>", 1)
 
 
 def _add_extra_css(doc, css):
@@ -809,6 +983,23 @@ def render_review_sheet(items, config, *, extras=True):
       absence is why csl-atlas's anatomy helper had to inline every colour
       (H1646); ``csl_pyutil.anatomy`` now ships its stylesheet through here.
 
+    Faceted browse (H1847, ``extras=True`` only):
+
+    - ``config["facets"]``: ordered list of dimensions, each either a mapping
+      ``{"key", "label", "values": [(value, label), ...]}`` or a
+      ``(key, label, values)`` triple. Renders a facet bar above the cards:
+      multi-select WITHIN a dimension (OR), intersected ACROSS dimensions
+      (AND), composed with the core single-dimension filter bar. Values carry
+      whatever label the caller passes — put the corpus count in it, since the
+      point of faceting a tag vocabulary is knowing how much a tag buys.
+    - item ``facets``: ``{dimension_key: [values]}`` for that card. A card is
+      matched by a dimension when it carries at least one selected value; a
+      dimension a card has no value for simply never matches, so filtering on
+      it hides that card rather than silently keeping it.
+    - ``config["facet_count_label"]`` / ``config["facet_reset_label"]``:
+      the visible-count template (``{shown}``/``{total}`` placeholders) and the
+      reset button's text — pass translations here, as with ``ui_strings``.
+
     Returns the full HTML document as a string.
     """
     show_ids = bool(config.get("show_ids", False))
@@ -842,6 +1033,9 @@ def render_review_sheet(items, config, *, extras=True):
     extra_css = config.get("extra_css")
     if extra_css is not None and not isinstance(extra_css, str):
         raise TypeError("extra_css must be a string")
+    facets = _normalize_facets(config.get("facets"))
+    facet_count_label = str(config.get("facet_count_label", "showing {shown} of {total}"))
+    facet_reset_label = str(config.get("facet_reset_label", "clear facets"))
     standard_on = bool(show_ids or rating is not None or save_as or note_min_height_px is not None
                        or any(it.get("title_href") for it in items))
     cards = "\n".join(render_card(it, config["approve_label"], config["reject_label"],
@@ -862,6 +1056,8 @@ def render_review_sheet(items, config, *, extras=True):
     }
     if not extras and config.get("strict_review") is not None:
         raise ValueError("strict_review requires extras=True")
+    if not extras and facets is not None:
+        raise ValueError("facets requires extras=True")
     if not extras:
         # Donor-parity mode: no scale layer, no caller CSS — see the fixture test.
         if standard_on:
@@ -892,6 +1088,8 @@ def render_review_sheet(items, config, *, extras=True):
     if reject_labels:
         doc = _add_reject_labels(doc, reject_labels, strict=strict is not None)
     doc = _add_font_scale(doc, float(font_scale))
+    if facets is not None:
+        doc = _add_facets(doc, facets, facet_count_label, facet_reset_label)
     if extra_css:
         doc = _add_extra_css(doc, extra_css)
     return _localize(doc, config.get("ui_strings"))
