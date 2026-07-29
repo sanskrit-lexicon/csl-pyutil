@@ -5,6 +5,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`config["facets"]` — faceted browse over N caller-defined dimensions (H1847).**
+  The core filter bar is ONE dimension, single-select (`data-filt`) — enough for a
+  stratum, useless for browsing a tag vocabulary. Cards now carry
+  `item["facets"] = {dimension: [values]}` (one JSON `data-facets` attribute, because a
+  card in both `ifc` and `Bhvr` has no honest single-attribute encoding), and the
+  rendered bar multi-selects WITHIN a dimension (OR) while intersecting ACROSS
+  dimensions (AND) — «all Vedic senses standing at the end of a compound» is one click
+  each. Value labels are whatever the caller passes, so corpus counts ride in the chip:
+  the census that motivated this
+  ([`nws_tag_census.py`](https://github.com/gasyoun/SanskritLexicography/blob/master/RussianTranslation/src/nws_tag_census.py),
+  48,214 senses) ends by noting a reviewer deciding whether a tag is worth a facet
+  needs its numbers. `facet_count_label` / `facet_reset_label` are translatable like
+  `ui_strings`. The layer is additive string surgery on the same stable anchors as
+  every other one — no `facets` key means a byte-identical pre-H1847 document, and
+  `extras=False` refuses it outright.
+- The facet click handler is registered *after* the core filter bar's, so the two
+  writers to `card.style.display` compose (base filter ∩ facets) instead of fighting —
+  the failure mode that would otherwise show a hidden card again on the next facet click.
+
+### Fixed
+
+- `review_sheet.__version__` had been left at `0.5.0` while the package moved to
+  `0.6.0` — two disagreeing version strings in one distribution. Both now track the
+  package version.
+
 ## [0.6.0] - 2026-07-29
 
 ### Added
