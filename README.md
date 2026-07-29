@@ -96,6 +96,42 @@ every item is voted, and every rejected item has a note. Callers that omit
 See [`csl_pyutil/review_sheet.py`](csl_pyutil/review_sheet.py) for the full
 item/config schema docstring.
 
+### Presentation (0.5.0)
+
+`config["font_scale"]` multiplies the whole type scale and **defaults to 1.5** —
+MG's "+150%", ruled 28-07-2026 while voting the G5 sheet, together with a fix to
+the inherited hierarchy: the panel `<pre>` holding the text under judgement used
+to be the smallest type on the page. An A−/A+ toolbar control re-points the scale
+per browser. `font_scale=1` restores the donor sizes; `extras=False` never gets
+the layer, so the byte-identical fixture stands.
+
+`config["extra_css"]` appends caller CSS last in the cascade.
+
+## `anatomy` — colour-coded CDSL raw markup
+
+```python
+from csl_pyutil import anatomy
+
+panel_body = anatomy.highlight(raw_record, target="As")     # tinted, markup still visible
+legend     = anatomy.legend_html(parts=["sanskrit", "gloss", "citation"])
+```
+
+A raw CDSL record dumped verbatim into a review card is a wall of punctuation.
+`highlight()` keeps every tag **visible** — the tags are the anatomy — but dims the
+delimiters and colours each payload by part class (Sanskrit form · gloss · citation ·
+grammar · abbreviation · cross-reference · etymology · homonym), outlining any form
+equal to `target`. Written for csl-atlas's xref sheet (H1646), moved here under H1808
+when a second generator needed it; csl-atlas's `scripts/lib/cdsl_anatomy.py` is now a
+re-export shim so there is one canonical copy.
+
+Hooks for what a shared module cannot know:
+
+| Argument | Use |
+|---|---|
+| `tag_parts={"ab": "crossref"}` | override the tag → part map (PWG wraps *every* abbreviation in `<ab>`; an xref sheet wants the brighter class) |
+| `plain_hook(text)` | reach text the markup does not delimit — NWS-layer cards carry citations as bare text with no `<ls>` around them |
+| `payload_hook(part, inner, attrs)` | render a tagged payload yourself, e.g. `<ls>` as a Cologne source link |
+
 The sheet's naming, placement (gitignored `review/`), GTD `@DO` line, and
 `Uprava/REVIEW_SHEETS_INDEX.md` registration are still the caller's job — this
 function only produces the HTML string. See

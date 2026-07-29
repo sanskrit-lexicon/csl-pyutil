@@ -360,3 +360,57 @@ def test_ui_strings_rejects_non_string_value():
     import pytest
     with pytest.raises(TypeError):
         render_review_sheet(_items(), _config(ui_strings={"download_button": 5}))
+
+
+# --------------------------------------------------------------------- H1808: type scale
+def test_font_scale_defaults_to_150_percent():
+    """MG 28-07-2026, voting the G5 sheet: 'increase fonts by default +150%'. The
+    default must be the big one — an opt-in knob would have left every existing
+    generator emitting the old sizes."""
+    out = render_review_sheet(_items(), _config())
+    assert "--fs:1.5;" in out
+    assert "font-size:calc(13.5px * var(--fs)) !important" in out   # .panel pre
+    assert 'id="fsUp"' in out and 'id="fsDown"' in out
+
+
+def test_font_scale_lifts_judged_text_above_the_chrome():
+    """The panel <pre> holds the text under judgement; in the donor template it was
+    the smallest type on the page (12px) while uppercase panel labels took the
+    weight. It must now outrank the panel chrome."""
+    out = render_review_sheet(_items(), _config())
+    pre = re.search(r"\.panel pre \{ font-size:calc\(([\d.]+)px", out)
+    label = re.search(r"\.badge, \.panel h4[^{]*\{ font-size:calc\(([\d.]+)px", out)
+    panel = re.search(r"\n  \.panel \{ font-size:calc\(([\d.]+)px", out)
+    assert pre and label and panel
+    assert float(pre.group(1)) > float(panel.group(1)) > float(label.group(1))
+
+
+def test_font_scale_one_restores_donor_sizes():
+    out = render_review_sheet(_items(), _config(font_scale=1))
+    assert "--fs:1;" in out
+
+
+def test_font_scale_validation():
+    with pytest.raises(ValueError):
+        render_review_sheet(_items(), _config(font_scale=9))
+    with pytest.raises(TypeError):
+        render_review_sheet(_items(), _config(font_scale="big"))
+
+
+def test_font_scale_absent_in_donor_parity_mode():
+    """extras=False is the byte-faithful donor shell (see the fixture test)."""
+    out = render_review_sheet(_items(), _config(), extras=False)
+    assert "--fs:" not in out
+    assert 'id="fsUp"' not in out
+
+
+def test_extra_css_lands_last_in_the_cascade():
+    out = render_review_sheet(_items(), _config(extra_css=".anatomy { letter-spacing:.01em }"))
+    assert ".anatomy { letter-spacing:.01em }" in out
+    assert out.index("/* caller css */") > out.index("--fs:")
+    assert out.index("/* caller css */") < out.index("</style>")
+
+
+def test_extra_css_rejects_non_string():
+    with pytest.raises(TypeError):
+        render_review_sheet(_items(), _config(extra_css=[".x{}"]))

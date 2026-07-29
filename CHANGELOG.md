@@ -5,6 +5,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-29
+
+### Added
+
+- **`config["font_scale"]` — the type scale, defaulting to 1.5 (H1808).** MG, voting
+  the SanskritLexicography G5 print-readiness sheet: «increase fonts by default
+  +150%». The donor template's sizes also inverted the hierarchy — `.panel pre`, the
+  text actually under judgement, was the *smallest* type on the page (12px) while
+  uppercase panel labels and toolbar chrome took the visual weight; it now sits above
+  the panel chrome (13.5px base). Every size routes through one `--fs` multiplier, and
+  an A−/A+ toolbar control re-points it per browser (persisted under
+  `review-sheet:<sheet_id>:fs`). The default is deliberately the big one: an opt-in
+  knob would have left every existing generator emitting the old sizes. `font_scale=1`
+  restores the donor sizes exactly, and `extras=False` (donor-parity mode) never gets
+  the layer at all, so the byte-identical fixture test is untouched.
+- **`config["extra_css"]` — a caller-CSS hook, appended last in the cascade.** Its
+  absence is why csl-atlas's anatomy helper had to inline every colour (H1646, whose
+  module docstring says so outright).
+- **`csl_pyutil.anatomy` — the CDSL raw-markup anatomy colouring, now shared (H1808).**
+  Lifted unchanged in behaviour from
+  [`csl-atlas/scripts/lib/cdsl_anatomy.py`](https://github.com/sanskrit-lexicon/csl-atlas/blob/main/scripts/lib/cdsl_anatomy.py)
+  (H1646, SHARED_CODE §23), which is now a re-export shim, when a SECOND sheet
+  generator needed the same thing and had no way to reach it — MG on the G5 sheet:
+  «why entry anatomy is missing again? It must be a hook». `highlight()` keeps the
+  markup visible, dims delimiters and colours the payload by part class;
+  `legend_html()` renders the swatch legend. New for the second caller: `<ab>` defaults
+  to its own `abbreviation` class (PWG wraps *every* abbreviation in it, not just
+  cf./Vgl. — csl-atlas passes `tag_parts={"ab": "crossref"}` for its xref semantics);
+  `plain_hook` reaches text the markup does not delimit (NWS-layer cards carry
+  citations as bare text with no `<ls>` around them); `payload_hook` lets a caller
+  render a tagged payload itself, e.g. an `<ls>` citation as a Cologne source link;
+  `legend_html(parts=…, extra_chips=…)` restricts and extends the legend.
+
 ## [0.5.0] - 2026-07-28
 
 ### Added
