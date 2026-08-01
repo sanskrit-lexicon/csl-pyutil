@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`screening=` required on `render_review_sheet(..., extras=True)` (H1649, V0.8.0).**
+  Mapping `{deterministic, lookup, agent, human, evidence_path, rules}` is rendered as a
+  sticky banner stating what was taken off the reviewer's plate. Building without it
+  raises `ValueError`. `extras=False` (donor byte-identical fixture) refuses `screening=`
+  so the historical shell stays untouched. Callers that have not screened must still pass
+  an honest block (e.g. all zeros on a–c and `human=len(items)` with `rules=["none"]` and
+  an evidence path that says so) — silence is no longer allowed.
 - **`config["facets"]` — faceted browse over N caller-defined dimensions (H1847).**
   The core filter bar is ONE dimension, single-select (`data-filt`) — enough for a
   stratum, useless for browsing a tag vocabulary. Cards now carry
