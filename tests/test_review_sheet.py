@@ -4,7 +4,27 @@ import re
 
 import pytest
 
-from csl_pyutil import render_review_sheet
+from csl_pyutil import render_review_sheet as _render_raw
+
+
+def _screening(n_human=2, **overrides):
+    """H1649 — every extras=True build must declare screening."""
+    s = {
+        "deterministic": 0,
+        "lookup": 0,
+        "agent": 0,
+        "human": n_human,
+        "evidence_path": "tests/fixture_screening.md",
+        "rules": ["none"],
+    }
+    s.update(overrides)
+    return s
+
+
+def render_review_sheet(items, config, *, extras=True, screening=None, **kw):
+    if extras and screening is None:
+        screening = _screening(n_human=len(items))
+    return _render_raw(items, config, extras=extras, screening=screening, **kw)
 
 
 def _config(**overrides):
@@ -25,6 +45,25 @@ def _items():
         {"id": "L2", "filt": "b", "title": "item two", "question": "second question",
          "panels": []},
     ]
+
+
+def test_screening_required_when_extras_true():
+    with pytest.raises(ValueError, match="screening="):
+        _render_raw(_items(), _config(), extras=True, screening=None)
+
+
+def test_screening_banner_present():
+    out = render_review_sheet(
+        _items(), _config(),
+        screening=_screening(deterministic=3, lookup=1, agent=2, human=2,
+                             rules=["dup-id", "skeleton"]),
+    )
+    assert 'data-screening="1"' in out
+    assert "deterministic 3" in out
+    assert "dataset lookup 1" in out
+    assert "agent adjudication 2" in out
+    assert "tests/fixture_screening.md" in out
+    assert "dup-id" in out
 
 
 def test_basic_shape():

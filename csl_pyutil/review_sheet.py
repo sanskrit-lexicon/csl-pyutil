@@ -918,7 +918,79 @@ def _localize(doc, ui_strings):
     return doc
 
 
-def render_review_sheet(items, config, *, extras=True):
+def _normalize_screening(screening):
+    """H1649 — screening block: counts + evidence path + rules applied.
+
+    Required shape (all keys required; counts are non-negative ints)::
+
+        {
+          "deterministic": int,   # (a) structure-only checks
+          "lookup": int,          # (b) existing dataset resolved the card
+          "agent": int,           # (c) agent adjudication with cited evidence
+          "human": int,           # (d) still rendered for a human
+          "evidence_path": str,   # path/URL of the evidence file
+          "rules": list[str],     # short names of rules applied
+        }
+
+    Only (d) cards should be in ``items``; the banner states what was taken
+    off the reviewer's plate.
+    """
+    if not isinstance(screening, dict):
+        raise TypeError("screening must be a mapping")
+    required = ("deterministic", "lookup", "agent", "human", "evidence_path", "rules")
+    missing = [k for k in required if k not in screening]
+    if missing:
+        raise ValueError("screening missing key(s): %s" % ", ".join(missing))
+    out = {}
+    for k in ("deterministic", "lookup", "agent", "human"):
+        v = screening[k]
+        if not isinstance(v, int) or isinstance(v, bool) or v < 0:
+            raise TypeError("screening[%r] must be a non-negative int" % k)
+        out[k] = v
+    ep = screening["evidence_path"]
+    if not isinstance(ep, str) or not ep.strip():
+        raise ValueError("screening['evidence_path'] must be a non-empty string")
+    out["evidence_path"] = ep.strip()
+    rules = screening["rules"]
+    if not isinstance(rules, (list, tuple)) or any(not isinstance(r, str) for r in rules):
+        raise TypeError("screening['rules'] must be a list of strings")
+    out["rules"] = list(rules)
+    return out
+
+
+def _screening_banner_html(screening):
+    """Sticky banner above the filter bar stating what screening removed."""
+    s = screening
+    total_screened = s["deterministic"] + s["lookup"] + s["agent"]
+    rules = ", ".join(esc(r) for r in s["rules"]) if s["rules"] else "—"
+    return (
+        '<aside class="screening-banner" role="status" data-screening="1">'
+        "<strong>Screening (H1649)</strong> — only human-required cards are below. "
+        "Off the plate: "
+        '<span class="sc-a">deterministic %d</span> · '
+        '<span class="sc-b">dataset lookup %d</span> · '
+        '<span class="sc-c">agent adjudication %d</span> '
+        "(total screened %d). "
+        "Human cards: <span class=\"sc-d\">%d</span>. "
+        'Evidence: <code>%s</code>. Rules: %s.'
+        "</aside>"
+        % (
+            s["deterministic"], s["lookup"], s["agent"], total_screened,
+            s["human"], esc(s["evidence_path"]), rules,
+        )
+    )
+
+
+_SCREENING_CSS = """
+  .screening-banner { margin: 0 20px 12px; padding: 10px 14px; border-radius: 8px;
+    border: 1px solid var(--accent); background: #152033; font-size: 12px; line-height: 1.45;
+    color: var(--text); max-width: 980px; }
+  .screening-banner code { font-size: 11px; color: var(--accent); }
+  .screening-banner .sc-d { color: var(--defer); font-weight: 700; }
+"""
+
+
+def render_review_sheet(items, config, *, extras=True, screening=None):
     """Build a self-contained HTML review/voting sheet.
 
     items: list of dicts, each ``{"id", "filt", "title", "badges": [...]
@@ -934,6 +1006,11 @@ def render_review_sheet(items, config, *, extras=True):
     extras: fold in the H779 auto-save + legend additions (default True for
         real callers). Pass False only to reproduce a pre-H779 shell's
         literal historical output (see tests/test_fixture_byte_identical.py).
+    screening: **required when extras=True** (H1649). Mapping with counts for
+        deterministic / lookup / agent / human, plus ``evidence_path`` and
+        ``rules``. Rendered as a banner so the reviewer sees what was taken
+        off their plate. Building without it raises ``ValueError``. Ignored
+        when ``extras=False`` (donor byte-identical path).
     config["strict_review"]: optional mapping enabling an additive strict
         decisions export. ``reviewer`` supplies the initial reviewer ID;
         ``require_all_votes`` and ``require_reject_note`` default to True.
@@ -1002,6 +1079,19 @@ def render_review_sheet(items, config, *, extras=True):
 
     Returns the full HTML document as a string.
     """
+    screening_norm = None
+    if extras:
+        if screening is None:
+            raise ValueError(
+                "screening= is required when extras=True (H1649). Pass a mapping with "
+                "deterministic/lookup/agent/human counts, evidence_path, and rules. "
+                "Use extras=False only for the donor byte-identical fixture path."
+            )
+        screening_norm = _normalize_screening(screening)
+    elif screening is not None:
+        # Donor path must stay byte-identical; refuse silent mixing.
+        raise ValueError("screening= is incompatible with extras=False")
+
     show_ids = bool(config.get("show_ids", False))
     rating = config.get("rating")
     if rating is not None:
@@ -1066,6 +1156,15 @@ def render_review_sheet(items, config, *, extras=True):
         if reject_labels:
             doc = _add_reject_labels(doc, reject_labels, strict=False)
         return doc
+
+    # H1649: inject screening banner + CSS before extras polish.
+    banner = _screening_banner_html(screening_norm)
+    if "</style>" in doc:
+        doc = doc.replace("</style>", _SCREENING_CSS + "\n</style>", 1)
+    if '<div class="toolbar">' in doc:
+        doc = doc.replace('<div class="toolbar">', banner + '\n<div class="toolbar">', 1)
+    else:
+        doc = doc.replace("<main", banner + "\n<main", 1)
 
     doc = _add_extras(doc)
     strict = config.get("strict_review")

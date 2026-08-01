@@ -56,6 +56,15 @@ html = render_review_sheet(
             "require_reject_note": True,
         },
     },
+    # Required when extras=True (default) since v0.8.0 / H1649:
+    screening={
+        "deterministic": 0,
+        "lookup": 0,
+        "agent": 0,
+        "human": 43,
+        "evidence_path": "review/screening_evidence.md",
+        "rules": ["none"],  # or the real rule names applied
+    },
 )
 open("review/commentarystrategies-sundarakanda_35-37_review.html", "w",
      encoding="utf-8").write(html)
