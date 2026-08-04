@@ -5,6 +5,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-08-04
+
+### Fixed
+
+- `review_sheet.__version__` was left at `0.7.0` while the package moved to `0.8.0` — the
+  same two-disagreeing-version-strings defect the `0.7.0` release claimed to close,
+  regressed one release later because nothing pinned it. Both now track the package
+  version again, and `tests/test_version_strings.py` asserts
+  `csl_pyutil.__version__ == review_sheet.__version__ == pyproject [project].version`
+  so the next bump cannot silently drift (H2131).
+
+## [0.8.0] - 2026-08-01
+
 ### Added
 
 - **`screening=` required on `render_review_sheet(..., extras=True)` (H1649, V0.8.0).**
@@ -14,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so the historical shell stays untouched. Callers that have not screened must still pass
   an honest block (e.g. all zeros on a–c and `human=len(items)` with `rules=["none"]` and
   an evidence path that says so) — silence is no longer allowed.
+
+## [0.7.0] - 2026-07-29
+
+### Added
+
 - **`config["facets"]` — faceted browse over N caller-defined dimensions (H1847).**
   The core filter bar is ONE dimension, single-select (`data-filt`) — enough for a
   stratum, useless for browsing a tag vocabulary. Cards now carry

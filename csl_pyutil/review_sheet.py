@@ -30,7 +30,7 @@ import html
 import json
 import re
 
-__version__ = "0.7.0"
+__version__ = "0.8.1"
 
 __all__ = ["render_review_sheet", "esc", "mark_cyrillic"]
 
