@@ -29,8 +29,11 @@ tests/fixtures/h180_typology_golden.html, regenerated to match).
 import html
 import json
 import re
+import warnings
 
-__version__ = "0.8.1"
+from csl_pyutil.evidence import PreflightError, PreflightWarning, preflight
+
+__version__ = "0.9.0"
 
 __all__ = ["render_review_sheet", "esc", "mark_cyrillic"]
 
@@ -876,6 +879,18 @@ UI_STRINGS = {
     # The H779 approve/reject/defer explanation (present only when extras=True).
     "legend": re.compile(
         r'(?P<pre><div class="legend" style="[^"]*">)(?P<body>.*?)(?P<post>\n</div>)', re.DOTALL),
+    # Per-card chrome (H1889). Both are emitted by render_card() once per card, so
+    # they are the only two visible strings a fully translated sheet could not
+    # reach — H1887 hit exactly this and deliberately refused to patch it with
+    # per-caller post-processing on the emitted HTML, which is the anti-pattern
+    # UI_STRINGS exists to kill. Anchored on the surrounding markup rather than
+    # replaced as bare words, because "Defer"/"Reason" also occur in the legend
+    # and in caller-supplied card text.
+    "defer_button": re.compile(
+        r'(?P<pre><button class="vote defer" data-vote="defer">&#9208; )(?P<body>Defer)'
+        r'(?P<post></button>)'),
+    "reject_reason_label": re.compile(
+        r'(?P<pre><span class="rejectlabellabel"[^>]*>)(?P<body>Reason)(?P<post></span>)'),
 }
 
 
@@ -990,7 +1005,81 @@ _SCREENING_CSS = """
 """
 
 
-def render_review_sheet(items, config, *, extras=True, screening=None):
+# ----------------------------------------------------------------------------- H1889 V9/V10
+# V1–V8 + H1808 are entirely PRESENTATION. A sheet can be green on every one of
+# them and still (a) ask a human to re-derive a conclusion the repo already holds
+# on disk, or (b) not be a decision at all. Measured on the sheet that triggered
+# this (H1887, 29-07-2026): 191 of 200 cards already had a machine verdict, a
+# named rule and cited evidence from the same inputs, none of it rendered; 69 of
+# 200 were not disagreements. MG ruled both must BLOCK on write, not warn — the
+# H1808 legibility hook warns, and that is why the anatomy defect came back a
+# second time.
+_V9_NO_MANIFEST = (
+    "render_review_sheet(sheet_id=%r) was called with no manifest= (V9, H1889), so "
+    "nothing checked whether this sheet asks a human what the repo already answers. "
+    "Build a csl_pyutil.evidence.EvidenceManifest, declare_joined() every artifact "
+    "keyed on these row ids, declare_omitted()/declare_omitted_path() the rest with a "
+    "reason, and pass manifest=. This is a migration ramp for the pre-H1889 "
+    "generators, not a permanent posture: it becomes an error in csl-pyutil 1.0.0. "
+    "Escalate it today with -W error::csl_pyutil.evidence.PreflightWarning."
+)
+
+_PREFLIGHT_KEYS = ("allow_slp1_tokens", "overlap_threshold", "skip_prior_art")
+
+
+def _check_non_decisions(items, threshold):
+    """V10 — a sheet that is mostly non-decisions must not be written.
+
+    The CALLER supplies the classifier (only it knows its domain) by setting
+    ``item["machine_resolvable"] = True`` on every card its own pre-filter already
+    resolved; the emitter only enforces the threshold. The default is 0.0 — a
+    machine-resolvable card has no business on a human's plate at all — and a
+    caller who genuinely wants slack passes a fraction.
+    """
+    if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
+        raise TypeError("non_decision_share must be a number in 0..1")
+    threshold = float(threshold)
+    if not (0.0 <= threshold <= 1.0):
+        raise ValueError("non_decision_share must lie within 0..1")
+    flagged = [str(it["id"]) for it in items if it.get("machine_resolvable")]
+    if not items or not flagged:
+        return
+    share = len(flagged) / float(len(items))
+    if share > threshold:
+        raise PreflightError([
+            "NON-DECISIONS: %d of %d card(s) (%.1f%%) are flagged machine_resolvable by "
+            "the caller's own pre-filter, over the %.1f%% allowed by "
+            "config['non_decision_share'] (e.g. %s). Resolve them in the pipeline and "
+            "render only what still needs a human — the screening block is where the "
+            "resolved ones get reported."
+            % (len(flagged), len(items), 100 * share, 100 * threshold,
+               ", ".join(flagged[:5]))
+        ])
+
+
+def _evidence_gate(doc, manifest, config, extras):
+    """V9 — run the H1887 preflight against the FINISHED document and raise before
+    a single byte reaches the caller. Absent manifest: warn loudly with the reason."""
+    opts = config.get("preflight") or {}
+    if not isinstance(opts, dict):
+        raise TypeError("config['preflight'] must be a mapping")
+    unknown = sorted(set(opts) - set(_PREFLIGHT_KEYS))
+    if unknown:
+        raise ValueError("unknown config['preflight'] key(s): %s; known keys: %s"
+                         % (", ".join(unknown), ", ".join(_PREFLIGHT_KEYS)))
+    if manifest is None:
+        if extras:
+            warnings.warn(_V9_NO_MANIFEST % config.get("sheet_id"),
+                          PreflightWarning, stacklevel=3)
+        return doc
+    preflight(manifest, doc,
+              allow_slp1_tokens=tuple(opts.get("allow_slp1_tokens", ())),
+              overlap_threshold=float(opts.get("overlap_threshold", 0.5)),
+              skip_prior_art=bool(opts.get("skip_prior_art", False)))
+    return doc
+
+
+def render_review_sheet(items, config, *, extras=True, screening=None, manifest=None):
     """Build a self-contained HTML review/voting sheet.
 
     items: list of dicts, each ``{"id", "filt", "title", "badges": [...]
@@ -1011,6 +1100,22 @@ def render_review_sheet(items, config, *, extras=True, screening=None):
         ``rules``. Rendered as a banner so the reviewer sees what was taken
         off their plate. Building without it raises ``ValueError``. Ignored
         when ``extras=False`` (donor byte-identical path).
+    manifest: **V9 (H1889)** — a ``csl_pyutil.evidence.EvidenceManifest`` naming
+        every repo artifact keyed on these row ids that was joined into the
+        cards, and every one deliberately left out with a reason. When passed,
+        :func:`csl_pyutil.evidence.preflight` runs against the FINISHED document
+        and raises ``PreflightError`` before any HTML is returned. When absent,
+        a ``PreflightWarning`` states the reason — a migration ramp for the
+        pre-H1889 generators, which becomes an error in 1.0.0. Tune the checks
+        with ``config["preflight"]`` (``allow_slp1_tokens``,
+        ``overlap_threshold``, ``skip_prior_art``).
+
+    config["non_decision_share"]: **V10 (H1889)** — the maximum fraction of
+        cards a sheet may carry that the CALLER's own pre-filter already
+        resolved, marked per card with ``item["machine_resolvable"] = True``.
+        Default **0.0**: a card the machine has answered does not belong on a
+        human's plate at all. Over the threshold raises ``PreflightError``. A
+        sheet whose items carry no such flag is unaffected.
     config["strict_review"]: optional mapping enabling an additive strict
         decisions export. ``reviewer`` supplies the initial reviewer ID;
         ``require_all_votes`` and ``require_reject_note`` default to True.
@@ -1092,6 +1197,9 @@ def render_review_sheet(items, config, *, extras=True, screening=None):
         # Donor path must stay byte-identical; refuse silent mixing.
         raise ValueError("screening= is incompatible with extras=False")
 
+    # V10 first: a sheet that should not exist is not worth rendering.
+    _check_non_decisions(items, config.get("non_decision_share", 0.0))
+
     show_ids = bool(config.get("show_ids", False))
     rating = config.get("rating")
     if rating is not None:
@@ -1155,7 +1263,10 @@ def render_review_sheet(items, config, *, extras=True, screening=None):
                                 note_min_height_px=note_min_height_px, rating=rating)
         if reject_labels:
             doc = _add_reject_labels(doc, reject_labels, strict=False)
-        return doc
+        # The gate never edits the document, so the donor fixture stays byte-identical;
+        # the absent-manifest WARN is suppressed here because this path exists only to
+        # reproduce a pre-H779 shell's historical output.
+        return _evidence_gate(doc, manifest, config, extras=False)
 
     # H1649: inject screening banner + CSS before extras polish.
     banner = _screening_banner_html(screening_norm)
@@ -1191,4 +1302,7 @@ def render_review_sheet(items, config, *, extras=True, screening=None):
         doc = _add_facets(doc, facets, facet_count_label, facet_reset_label)
     if extra_css:
         doc = _add_extra_css(doc, extra_css)
-    return _localize(doc, config.get("ui_strings"))
+    doc = _localize(doc, config.get("ui_strings"))
+    # Last, on the finished document: the script-purity and citation checks must see
+    # exactly what the reviewer will see, translations and all.
+    return _evidence_gate(doc, manifest, config, extras=True)
