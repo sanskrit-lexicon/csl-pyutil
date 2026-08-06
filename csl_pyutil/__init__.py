@@ -8,9 +8,14 @@ render_review_sheet(items, config, extras=True)   self-contained HTML review/
                                                     voting sheet (H925)
 anatomy.highlight(raw, target=None, ...)          colour-coded CDSL raw-markup
 anatomy.legend_html(parts=None, ...)                anatomy for a panel (H1808)
+evidence.EvidenceManifest / evidence.preflight    the V9 evidence-reuse gate a
+                                                    sheet must pass before it is
+                                                    written (H1889)
 """
-from csl_pyutil import anatomy
+from csl_pyutil import anatomy, evidence
+from csl_pyutil.evidence import EvidenceManifest, PreflightError, PreflightWarning, preflight
 from csl_pyutil.review_sheet import render_review_sheet, esc, mark_cyrillic
 
-__version__ = "0.8.1"
-__all__ = ["render_review_sheet", "esc", "mark_cyrillic", "anatomy"]
+__version__ = "0.9.0"
+__all__ = ["render_review_sheet", "esc", "mark_cyrillic", "anatomy", "evidence",
+           "EvidenceManifest", "PreflightError", "PreflightWarning", "preflight"]

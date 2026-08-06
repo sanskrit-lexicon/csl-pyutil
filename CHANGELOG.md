@@ -5,6 +5,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-06
+
+### Added
+
+- **`csl_pyutil.evidence` — the review-sheet evidence gate, lifted from its one-repo
+  home (H1889).** `EvidenceManifest`, `preflight()`, `valid_sutras()`,
+  `sutra_href()`, the D1/D2 SLP1 detectors and the mixed-script detector move here
+  from
+  [`SanskritLexicography/RussianTranslation/src/review_evidence_preflight.py`](https://github.com/gasyoun/SanskritLexicography/blob/master/RussianTranslation/src/review_evidence_preflight.py)
+  (H1887), whose copy becomes a re-export shim — the same pattern H1808 used for
+  `cdsl_anatomy`. Lifted, not rewritten: both deliberate asymmetries survive
+  verbatim — a conceptual `declare_omitted()` can never silence a FOUND artifact
+  (only `declare_omitted_path()` can), and the SLP1 detector stays silent on the
+  undecidable all-lowercase case rather than guessing. `repo_root` now defaults to
+  the current working directory instead of the module's own parent, which is the
+  only behavioural change the move forced.
+- **V9 — `render_review_sheet(..., manifest=)` runs the gate and RAISES before any
+  HTML is returned (H1889).** V1–V8 + H1808 are entirely presentation, so a sheet
+  could be green on every rule and still ask a human to re-derive what the repo
+  already holds on disk: measured on the sheet that triggered this, **191 of 200
+  cards** already had a machine verdict, a named rule and cited evidence from the
+  same inputs, and none of it was rendered. The gate runs on the FINISHED document,
+  after `ui_strings`, so the script-purity and citation checks see exactly what the
+  reviewer will see. Tunable via `config["preflight"]` (`allow_slp1_tokens`,
+  `overlap_threshold`, `skip_prior_art`); an unknown key raises rather than being
+  ignored. With no `manifest=`, a `PreflightWarning` states the reason so the 22+
+  existing generators keep working — a migration ramp with a deadline (it becomes an
+  error in 1.0.0), not a permanent posture; escalate it today with
+  `-W error::csl_pyutil.evidence.PreflightWarning`.
+- **V10 — `config["non_decision_share"]`: a sheet that is mostly non-decisions is
+  refused (H1889).** 69 of those same 200 cards were not disagreements at all. The
+  CALLER classifies (`item["machine_resolvable"] = True`) because only it knows its
+  domain; the emitter enforces the threshold, which **defaults to 0.0** — a card the
+  machine has already answered has no business on a human's plate. Over the
+  threshold raises `PreflightError`; a sheet with no flagged item is unaffected, so
+  every existing caller is untouched.
+- **`ui_strings` keys `defer_button` and `reject_reason_label` (H1889).** The
+  per-card "Defer" button and the H1802 reject-picker's "Reason" label were the last
+  two visible strings a fully translated sheet could not reach, so a Russian sheet
+  still showed two English words. H1887 deliberately refused to patch this with
+  per-caller post-processing of the emitted HTML — the exact anti-pattern
+  `UI_STRINGS` exists to kill. Both are anchored on their surrounding markup, so the
+  legend's own `<b>Defer</b>` explanation and any caller text saying "Reason" are
+  left alone.
+
 ## [0.8.1] - 2026-08-04
 
 ### Fixed

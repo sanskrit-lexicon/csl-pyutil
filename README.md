@@ -1,6 +1,6 @@
 # csl-pyutil
 
-_Created: 14-07-2026 · Last updated: 14-07-2026_
+_Created: 14-07-2026 · Last updated: 06-08-2026_
 
 Generic (non-Sanskrit-specific) Python helpers shared across the CDSL /
 Sanskrit-Lexicon repos. Distinct from
@@ -115,6 +115,55 @@ per browser. `font_scale=1` restores the donor sizes; `extras=False` never gets
 the layer, so the byte-identical fixture stands.
 
 `config["extra_css"]` appends caller CSS last in the cascade.
+
+### The evidence gate — V9 / V10 (0.9.0)
+
+V1–V8 are entirely about *presentation*. A sheet can be green on every one of them
+and still ask a human to re-derive, by eye, a conclusion the repo already holds on
+disk — measured 29-07-2026 on the sheet that prompted this: **191 of 200 cards**
+already carried a machine verdict, a named rule and cited evidence computed from
+the same inputs, none of it rendered, and **69 of 200** were not disagreements at
+all. So the emitter now refuses to write those sheets.
+
+```python
+from csl_pyutil import EvidenceManifest, render_review_sheet
+
+man = EvidenceManifest(sheet_id=SHEET_ID, row_ids=[i["id"] for i in items],
+                       repo_root=REPO)
+man.declare_joined("research/adjudication.tsv", ["verdict", "rule", "reason"])
+man.declare_omitted_path("research/superseded_run.tsv",
+                         because="superseded by the H1681 rerun, kept for audit")
+man.declare_omitted("DCS attested sentence",
+                    because="no per-compound sentence map exists; only sense-level")
+for it in items:
+    man.add_card(it["id"], evidence_fields=["verdict", "rule"])
+
+html = render_review_sheet(items, config, screening=..., manifest=man)  # raises, or returns
+```
+
+**V9 — evidence reuse.** With `manifest=`, [`preflight()`](https://github.com/sanskrit-lexicon/csl-pyutil/blob/main/csl_pyutil/evidence.py)
+runs against the *finished* document (after `ui_strings`, so it sees exactly what the
+reviewer sees) and raises `PreflightError` before a byte is returned: undeclared
+prior art keyed on the same row ids, cards under the evidence floor with no stated
+reason, Cyrillic/IAST mixed inside one word, SLP1 leaking into human-facing text,
+and structurally impossible sūtra citations. Tune it with `config["preflight"]`
+(`allow_slp1_tokens`, `overlap_threshold`, `skip_prior_art`). Without `manifest=`
+you get a `PreflightWarning` naming the reason — a migration ramp for the pre-0.9.0
+generators that **becomes an error in 1.0.0**; escalate it today with
+`-W error::csl_pyutil.evidence.PreflightWarning`.
+
+**V10 — no non-decisions.** `config["non_decision_share"]` is the largest fraction
+of cards the sheet may carry that your own pre-filter already resolved, marked per
+card as `item["machine_resolvable"] = True`. The caller classifies (only it knows its
+domain); the emitter enforces. It **defaults to 0.0** — a card the machine has
+answered does not belong on a human's plate — and a sheet with no flagged item is
+unaffected.
+
+Two asymmetries in the gate are deliberate and load-bearing: a conceptual
+`declare_omitted()` can never silence a real file the scan found (only
+`declare_omitted_path()` can), and the SLP1 detector stays **silent** on the
+undecidable all-lowercase case (`agni + deva` is byte-identical in SLP1 and IAST)
+rather than guessing.
 
 ## `anatomy` — colour-coded CDSL raw markup
 
