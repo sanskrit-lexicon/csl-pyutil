@@ -33,7 +33,7 @@ import warnings
 
 from csl_pyutil.evidence import PreflightError, PreflightWarning, preflight
 
-__version__ = "0.10.0"
+__version__ = "0.11.0"
 
 __all__ = ["render_review_sheet", "esc", "mark_cyrillic"]
 
@@ -880,10 +880,17 @@ _TIMING_JS = '''
   function __timeFlush() {
     try { localStorage.setItem(TIME_KEY, JSON.stringify(__timing)); } catch (e) {}
   }
+  // V12 (H2858): the clock is stoppable. `paused` rides in the same persisted
+  // record as the totals, so a reviewer who pauses and closes the tab does not
+  // come back to a clock that ran all night.
+  var __timePaused = !!__timing.paused;
+  function __timePauseSet(v) {
+    __timePaused = !!v; __timing.paused = __timePaused; __timeLast = Date.now(); __timeFlush();
+  }
   setInterval(function () {
     var now = Date.now(), dt = (now - __timeLast) / 1000;
     __timeLast = now;
-    if (document.hidden || dt <= 0 || dt > 4) return;
+    if (document.hidden || __timePaused || dt <= 0 || dt > 4) return;
     __timing.total += dt;
     var id = __timeActiveId();
     if (id) __timing.per[id] = (__timing.per[id] || 0) + dt;
@@ -914,6 +921,131 @@ def _add_timing(doc):
     doc = doc.replace(_TIMING_ITEM_OLD, _TIMING_ITEM_NEW)
     doc = doc.replace(_TIMING_PAYLOAD_OLD, _TIMING_PAYLOAD_NEW)
     return doc.replace("})();\n</script>", _TIMING_JS + "})();\n</script>", 1)
+
+
+# ----------------------------------------------------------------------------- V12 hand-in (H2858)
+# MG, after one sitting on the BookIndex crosswalk gate (15-08-2026, 30 ✅ / 14 ❌
+# of 255, 14 min): «Хочу поставить на паузу, остановить таймер и остановить
+# работу, сдать то что было. Но такой функции как сдать сколько успел нет — а
+# она нужна.» Mechanically the plain download button always exported partial
+# work (unvoted items carry `decision: null`), but nothing in the sheet SAID so:
+# a button labelled "Download decisions.json" reads as the finish line, and in a
+# strict sheet it is one — the strict handler refuses to export until every card
+# is voted. So a reviewer who runs out of time has no sanctioned way to stop.
+#
+# V12 gives that stop two controls:
+#
+# * ⏸ next to the ⏱ chip — freezes the V11 clock, so a pause is not billed as
+#   review time. The paused flag persists with the totals.
+# * "Hand in what I got" — flushes the notes, stops the clock, and exports the
+#   same decisions payload marked `partial: true` with `undecided: N`, under a
+#   `_decisions_partial.json` filename so it cannot be mistaken for a finished
+#   sheet. It deliberately BYPASSES the strict all-votes gate (that gate exists
+#   to stop a sheet being *closed* half-done, not to trap a reviewer's work in a
+#   browser) while still carrying `complete: false` and the reviewer id.
+#
+# Nothing is dropped: the votes stay in localStorage, so the sitting can resume,
+# and the applier is already partial-safe — a `null` decision is never applied.
+_HANDIN_CSS = '''  .dl.handin { background:#243447; }
+  .tally .pausebtn { background:none; border:1px solid var(--border); color:var(--muted);
+                     border-radius:6px; padding:0 6px; margin-left:4px; cursor:pointer;
+                     font-size:inherit; font-family:inherit; line-height:1.6; }
+  .tally .pausebtn.on { color:#ffd479; border-color:#ffd479; }
+  .tally .time.paused { opacity:.45; }
+  .handin-said { color:var(--muted); font-size:12px; margin-left:10px; }
+'''
+
+_HANDIN_BUTTON = ('<button class="dl handin" id="handinBtn" title="stop the clock and export '
+                  'the votes made so far; the rest stay saved in this browser">'
+                  'Hand in what I got</button>'
+                  '<span class="handin-said" id="handinSaid"></span>')
+
+_PAUSE_BUTTON = ('<button type="button" class="pausebtn" id="pauseBtn" '
+                 'title="pause the clock — a break is not review time">&#9208;</button>\n    ')
+
+def _handin_js(*, timing, rating_on, reject_labels_on, strict_on):
+    """The hand-in controller, emitted for exactly the layers this sheet has.
+
+    Deliberately NOT written with `typeof RATING`/`typeof __timeTotal` guards:
+    the emitter already knows which layers are on, and a guard would put those
+    identifiers into every document — including the ones whose contract is that
+    the identifier is absent (`test_timing_opt_out`,
+    `test_reject_labels_absent_leaves_behaviour_unchanged`). Knowing at build
+    time keeps each sheet's script to what that sheet actually has.
+
+    The item is assembled by assignment rather than as one object literal, so it
+    never contains V11's `note: rec.note || ''` surgery target — this layer
+    instruments its own `time_seconds` and must not be rewritten a second time
+    whichever order the layers run in.
+    """
+    pause = '''
+  var __pauseBtn = document.getElementById('pauseBtn');
+  function __pauseShow() {
+    __pauseBtn.classList.toggle('on', __timePaused);
+    __pauseBtn.innerHTML = __timePaused ? '&#9654;' : '&#9208;';
+    var chip = document.querySelector('.tally .time');
+    if (chip) chip.classList.toggle('paused', __timePaused);
+  }
+  __pauseBtn.addEventListener('click', function () { __timePauseSet(!__timePaused); __pauseShow(); });
+  __pauseShow();
+''' if timing else ""
+    stop_clock = "    __timePauseSet(true); __pauseShow();\n" if timing else ""
+    per_item = "      item.time_seconds = __timeFor(id);\n" if timing else ""
+    if rating_on:
+        per_item += "      item.rating = (rec.rating == null ? null : rec.rating);\n"
+    if reject_labels_on:
+        per_item += "      item.reject_label = rec.reject_label || null;\n"
+    total = "    payload.time_total_seconds = __timeTotal();\n" if timing else ""
+    reviewer = "    payload.reviewer = strictReviewer.value.trim();\n" if strict_on else ""
+    return '''
+  var HANDIN_SAID = 'handed in {n} of {total} — clock stopped, the rest stay saved in this browser';
+  var __handinBtn = document.getElementById('handinBtn');
+  var __handinSaid = document.getElementById('handinSaid');
+''' + pause + '''  __handinBtn.addEventListener('click', function () {
+    ids.forEach(function (id) { syncNoteFromDom(id); });
+''' + stop_clock + '''    var items = ids.map(function (id) {
+      var rec = state[id] || {};
+      var item = { id: id, decision: rec.decision || null };
+      item.note = rec.note || '';
+''' + per_item + '''      return item;
+    });
+    var decided = items.filter(function (it) { return !!it.decision; }).length;
+    var payload = { sheet_id: SHEET_ID, generated: GENERATED, decided: decided,
+      partial: true, complete: false, undecided: items.length - decided, items: items };
+''' + total + reviewer + '''    var blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
+    var url = URL.createObjectURL(blob); var a = document.createElement('a');
+    a.href = url; a.download = SHEET_ID + '_decisions_partial.json';
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+    __handinSaid.textContent = HANDIN_SAID.replace('{n}', decided).replace('{total}', items.length);
+  });
+'''
+
+
+def _add_handin(doc, generated_json, *, timing, rating_on, reject_labels_on, strict_on):
+    """V12 — the partial hand-in + clock pause. Applied after V11, so the pause
+    control can drive the clock that layer installed; with ``timing=False`` the
+    pause control is not emitted at all (there is nothing to pause) and the
+    hand-in button still exports."""
+    doc = doc.replace("</style>", _HANDIN_CSS + "</style>", 1)
+    dl_anchor = '<button class="dl" id="downloadBtn">Download decisions.json</button>'
+    if dl_anchor not in doc:
+        raise ValueError("review-sheet download button anchor is missing")
+    doc = doc.replace(dl_anchor, dl_anchor + _HANDIN_BUTTON, 1)
+    if timing:
+        tally_anchor = '<span class="unvoted">'
+        if tally_anchor not in doc:
+            raise ValueError("review-sheet tally anchor is missing")
+        doc = doc.replace(tally_anchor, _PAUSE_BUTTON + tally_anchor, 1)
+    # The core download handler builds its payload from a literal `generated`; the
+    # hand-in handler needs the same value, so bind it once as a named constant.
+    gen_anchor = "  var STORE_KEY = 'review-sheet:' + SHEET_ID;"
+    if gen_anchor not in doc:
+        raise ValueError("review-sheet store-key anchor is missing")
+    doc = doc.replace(gen_anchor, gen_anchor + "\n  var GENERATED = " + generated_json + ";", 1)
+    js = _handin_js(timing=timing, rating_on=rating_on,
+                    reject_labels_on=reject_labels_on, strict_on=strict_on)
+    return doc.replace("})();\n</script>", js + "})();\n</script>", 1)
 
 
 def _add_standard(doc, *, save_as=None, sheet_id=None, note_min_height_px=None, rating=None):
@@ -994,6 +1126,20 @@ UI_STRINGS = {
     "timing_title": re.compile(
         r'(?P<pre><span class="time" title=")'
         r'(?P<body>active time on this sheet \(while the tab is visible\))(?P<post>">)'),
+    # V12 hand-in (present unless config["hand_in"] is False): the button label,
+    # the two tooltips, and the sentence the sheet says back after a hand-in.
+    # That sentence is assembled in JS, so it lives as one template literal with
+    # {n}/{total} placeholders — a translation keeps the placeholders and needs
+    # no JS of its own.
+    "handin_button": "Hand in what I got",
+    "handin_title": re.compile(
+        r'(?P<pre>id="handinBtn" title=")(?P<body>stop the clock and export the votes made so '
+        r'far; the rest stay saved in this browser)(?P<post>">)'),
+    "pause_title": re.compile(
+        r'(?P<pre>id="pauseBtn" title=")'
+        r'(?P<body>pause the clock — a break is not review time)(?P<post>">)'),
+    "handin_said": re.compile(
+        r"(?P<pre>var HANDIN_SAID = ')(?P<body>[^']*)(?P<post>';)"),
 }
 
 
@@ -1296,6 +1442,23 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
       ``time_seconds``. Pass ``False`` to opt a sheet out. Translate the
       chip tooltip via ``ui_strings["timing_title"]``.
 
+    Hand-in and pause (V12, H2858, ``extras=True`` only — default ON):
+
+    - ``config["hand_in"]`` (bool, default True): a second toolbar button,
+      **Hand in what I got**, and a ⏸ toggle beside the ⏱ chip. The toggle
+      freezes the V11 clock (a break is not review time; the paused flag
+      persists with the totals). The button flushes the notes, stops the clock,
+      and exports the decisions payload marked ``partial: true`` /
+      ``complete: false`` with ``undecided: N``, under a
+      ``<sheet_id>_decisions_partial.json`` filename. It deliberately bypasses
+      the ``strict_review`` all-votes gate — that gate exists to stop a sheet
+      being *closed* half-done, not to trap a reviewer's work in a browser — and
+      still carries the reviewer id when strict is on. Votes stay in
+      localStorage, so the sitting resumes; appliers are already partial-safe,
+      since a ``null`` decision is never applied. Translate via
+      ``ui_strings["handin_button"|"handin_title"|"pause_title"|"handin_said"]``
+      (``handin_said`` keeps its ``{n}``/``{total}`` placeholders).
+
     Returns the full HTML document as a string.
     """
     screening_norm = None
@@ -1348,6 +1511,9 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
     timing = config.get("timing", True)
     if not isinstance(timing, bool):
         raise TypeError("timing must be a bool")
+    hand_in = config.get("hand_in", True)
+    if not isinstance(hand_in, bool):
+        raise TypeError("hand_in must be a bool")
     facets = _normalize_facets(config.get("facets"))
     facet_count_label = str(config.get("facet_count_label", "showing {shown} of {total}"))
     facet_reset_label = str(config.get("facet_reset_label", "clear facets"))
@@ -1421,6 +1587,14 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
         doc = _add_extra_css(doc, extra_css)
     if timing:
         doc = _add_timing(doc)
+    if hand_in:
+        # After timing: the pause control drives the clock that layer installed,
+        # and this layer instruments its own item, so it must not be in the
+        # document when V11's item surgery runs.
+        doc = _add_handin(doc, json.dumps(config["generated"]), timing=timing,
+                          rating_on=rating is not None,
+                          reject_labels_on=bool(reject_labels),
+                          strict_on=config.get("strict_review") is not None)
     doc = _localize(doc, config.get("ui_strings"))
     # Last, on the finished document: the script-purity and citation checks must see
     # exactly what the reviewer will see, translations and all.

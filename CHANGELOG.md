@@ -5,6 +5,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-08-15
+
+### Added
+
+- **V12 — «hand in what I got» + a pausable clock, on by default for every
+  `extras=True` sheet
+  ([H2858](https://github.com/gasyoun/Uprava/blob/main/handoffs/H2858-Opus_csl-pyutil_review-sheet-partial-submit-pause-timer_15.08.26.md)).**
+  MG, after one sitting on the BookIndex crosswalk gate (15-08-2026 — 30 approve
+  / 14 reject of 255 cards in 14 minutes): «Хочу поставить на паузу, остановить
+  таймер и остановить работу, сдать то что было. Но такой функции как сдать
+  сколько успел нет — а она нужна.» Mechanically the plain download button had
+  always exported partial work (unvoted items carry `decision: null`), but
+  nothing in the sheet *said* so: a button labelled "Download decisions.json"
+  reads as the finish line, and under `strict_review` it genuinely is one — that
+  handler refuses to export until every card is voted. A reviewer who ran out of
+  time therefore had no sanctioned way to stop.
+
+  Two controls close that: a ⏸ toggle beside the V11 ⏱ chip freezes the clock
+  (a break is not review time; the paused flag persists in localStorage with the
+  totals, so a pause survives closing the tab), and a second toolbar button
+  flushes the notes, stops the clock, and exports the decisions payload marked
+  `partial: true` / `complete: false` with `undecided: N`, under a
+  `<sheet_id>_decisions_partial.json` filename that cannot be mistaken for a
+  finished sheet. The hand-in deliberately bypasses the strict all-votes gate —
+  that gate exists to stop a sheet being *closed* half-done, not to trap a
+  reviewer's work in a browser — while still carrying the reviewer id. Votes
+  stay in localStorage, so the sitting resumes; appliers are already
+  partial-safe, since a `null` decision is never applied.
+
+  Emitted for exactly the layers a given sheet has (no `typeof` probes, so a
+  `timing=False` or reject-label-less sheet keeps its identifier-absence
+  contract), and the item is assembled by assignment rather than as the shared
+  object literal, so V11's item surgery cannot instrument it twice.
+  `config["hand_in"] = False` opts a sheet out; the donor `extras=False` fixture
+  path never gets it; the label, both tooltips, and the confirmation sentence
+  (which keeps its `{n}`/`{total}` placeholders) translate through
+  `ui_strings["handin_button"|"handin_title"|"pause_title"|"handin_said"]`.
+
 ## [0.10.0] - 2026-08-15
 
 ### Added
