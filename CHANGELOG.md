@@ -5,7 +5,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.9.0] - 2026-08-06
+## [0.10.0] - 2026-08-15
+
+### Added
+
+- **V11 — active-time metering, on by default for every `extras=True` sheet
+  ([H2840](https://github.com/gasyoun/Uprava/blob/main/handoffs/H2840-Fable_csl-pyutil_review-sheet-timing-v11_15.08.26.md)).**
+  MG, voting the BookIndex crosswalk gate 15-08-2026: the sheet itself must
+  measure how long the reviewer spends on the page and on each card — here and
+  in every other vote. A 1 s tick accumulates while the tab is visible (a gap
+  over 4 s is discarded as sleep/hidden) and is attributed to the card nearest
+  the viewport centre; a live `⏱` counter joins the tally; totals persist in
+  localStorage beside the votes and ship in the decisions export as integer
+  seconds — top-level `time_total_seconds`, per item `time_seconds` — so the
+  apply pipeline and the vote hub's «Труд» traffic light can calibrate on real
+  numbers instead of guesses. Additive string surgery applied LAST, so the
+  item-literal instrumentation catches every constructor the earlier layers
+  (rating, reject-label, strict) produce; the donor `extras=False` fixture path
+  never gets it; `config["timing"] = False` opts a sheet out;
+  `ui_strings["timing_title"]` translates the chip tooltip.
 
 ### Added
 

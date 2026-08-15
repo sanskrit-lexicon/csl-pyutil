@@ -33,7 +33,7 @@ import warnings
 
 from csl_pyutil.evidence import PreflightError, PreflightWarning, preflight
 
-__version__ = "0.9.0"
+__version__ = "0.10.0"
 
 __all__ = ["render_review_sheet", "esc", "mark_cyrillic"]
 
@@ -817,6 +817,105 @@ def _add_reject_labels(doc, reject_labels, *, strict=False):
     return doc
 
 
+# ----------------------------------------------------------------------------- V11 timing (H2840)
+# MG, voting the BookIndex crosswalk gate 15-08-2026: «Нужно засекать внутри
+# страницы сколько времени я трачу на страницу целиком и на каждый пункт по
+# отдельности, тут и в остальных голосованиях.» So the sheet itself measures
+# ACTIVE time (tab visible, machine awake) — total for the page and attributed
+# per card — and ships both inside the decisions export, where the apply
+# pipeline and later effort-calibration (the 🟢/🟡/🔴 «Труд» traffic light on
+# the vote hub is currently a guess) can read real numbers instead.
+#
+# Mechanics: a 1 s tick accumulates wall time while the document is visible; a
+# tick longer than 4 s means the tab was hidden or the machine slept and is
+# discarded, never attributed. Each tick's second goes to the card whose visible
+# area is closest to the viewport's vertical centre — the card being read — so
+# skimming past N cards costs each of them only the seconds they actually held
+# the centre. Totals persist in localStorage next to the votes (surviving
+# reload/resume, like the votes themselves) and export as integer seconds:
+# top-level ``time_total_seconds``, per item ``time_seconds``. Additive string
+# surgery on the same stable anchors as every other layer; ``extras=False``
+# (donor fixture) never gets it, and ``config["timing"] = False`` opts a sheet
+# out.
+_TIMING_CSS = '''  .tally .time { color:var(--muted); }
+'''
+
+_TIMING_HTML = ('<span class="time" title="active time on this sheet (while the tab is visible)">'
+                '&#9201; <span class="count" id="t-total">0:00</span></span>\n    ')
+
+_TIMING_JS = '''
+  var TIME_KEY = STORE_KEY + ':timing';
+  var __timing = { total: 0, per: {} };
+  try {
+    var __t0 = JSON.parse(localStorage.getItem(TIME_KEY) || 'null');
+    if (__t0 && typeof __t0.total === 'number') __timing = __t0;
+  } catch (e) {}
+  if (!__timing.per) __timing.per = {};
+  function __timeFor(id) { return Math.round(__timing.per[id] || 0); }
+  function __timeTotal() { return Math.round(__timing.total || 0); }
+  function __timeFmt(s) {
+    s = Math.round(s); var m = Math.floor(s / 60);
+    return (m >= 60 ? Math.floor(m / 60) + ':' + ('0' + (m - Math.floor(m / 60) * 60)).slice(-2) : m)
+      + ':' + ('0' + (s - m * 60)).slice(-2);
+  }
+  function __timeShow() {
+    var el = document.getElementById('t-total');
+    if (el) el.textContent = __timeFmt(__timing.total);
+  }
+  var __timeLast = Date.now(), __timeDirty = 0;
+  var __timeCards = Array.prototype.slice.call(document.querySelectorAll('.card'));
+  function __timeActiveId() {
+    var mid = window.innerHeight / 2, best = null, bestd = Infinity;
+    for (var i = 0; i < __timeCards.length; i++) {
+      var c = __timeCards[i];
+      if (c.style.display === 'none') continue;
+      var r = c.getBoundingClientRect();
+      if (r.bottom < 0 || r.top > window.innerHeight) continue;
+      var center = (Math.max(r.top, 0) + Math.min(r.bottom, window.innerHeight)) / 2;
+      var d = Math.abs(center - mid);
+      if (d < bestd) { bestd = d; best = c; }
+    }
+    return best ? best.getAttribute('data-id') : null;
+  }
+  function __timeFlush() {
+    try { localStorage.setItem(TIME_KEY, JSON.stringify(__timing)); } catch (e) {}
+  }
+  setInterval(function () {
+    var now = Date.now(), dt = (now - __timeLast) / 1000;
+    __timeLast = now;
+    if (document.hidden || dt <= 0 || dt > 4) return;
+    __timing.total += dt;
+    var id = __timeActiveId();
+    if (id) __timing.per[id] = (__timing.per[id] || 0) + dt;
+    __timeDirty += dt;
+    if (__timeDirty >= 5) { __timeDirty = 0; __timeFlush(); }
+    __timeShow();
+  }, 1000);
+  document.addEventListener('visibilitychange', function () { __timeLast = Date.now(); });
+  window.addEventListener('beforeunload', __timeFlush);
+  __timeShow();
+'''
+
+_TIMING_ITEM_OLD = "note: rec.note || ''"
+_TIMING_ITEM_NEW = "note: rec.note || '', time_seconds: __timeFor(id)"
+_TIMING_PAYLOAD_OLD = "decided: decided,"
+_TIMING_PAYLOAD_NEW = "decided: decided, time_total_seconds: __timeTotal(),"
+
+
+def _add_timing(doc):
+    """V11 — active-time metering, applied LAST so the item-literal surgery
+    catches every variant the earlier layers (rating, reject_label, strict)
+    already produced around the shared ``note`` field."""
+    doc = doc.replace("</style>", _TIMING_CSS + "</style>", 1)
+    tally_anchor = '<span class="unvoted">'
+    if tally_anchor not in doc:
+        raise ValueError("review-sheet tally anchor is missing")
+    doc = doc.replace(tally_anchor, _TIMING_HTML + tally_anchor, 1)
+    doc = doc.replace(_TIMING_ITEM_OLD, _TIMING_ITEM_NEW)
+    doc = doc.replace(_TIMING_PAYLOAD_OLD, _TIMING_PAYLOAD_NEW)
+    return doc.replace("})();\n</script>", _TIMING_JS + "})();\n</script>", 1)
+
+
 def _add_standard(doc, *, save_as=None, sheet_id=None, note_min_height_px=None, rating=None):
     """Apply the 19-07-2026 standard layers. Each is independent surgery on a
     stable core-template anchor; nothing here touches _CORE_TEMPLATE itself."""
@@ -891,6 +990,10 @@ UI_STRINGS = {
         r'(?P<post></button>)'),
     "reject_reason_label": re.compile(
         r'(?P<pre><span class="rejectlabellabel"[^>]*>)(?P<body>Reason)(?P<post></span>)'),
+    # V11 timing chip tooltip (present unless config["timing"] is False).
+    "timing_title": re.compile(
+        r'(?P<pre><span class="time" title=")'
+        r'(?P<body>active time on this sheet \(while the tab is visible\))(?P<post>">)'),
 }
 
 
@@ -1182,6 +1285,17 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
       the visible-count template (``{shown}``/``{total}`` placeholders) and the
       reset button's text — pass translations here, as with ``ui_strings``.
 
+    Timing (V11, H2840, ``extras=True`` only — default ON):
+
+    - ``config["timing"]`` (bool, default True): the sheet meters the
+      reviewer's ACTIVE time — a 1 s tick accumulates while the tab is
+      visible (a gap over 4 s is discarded as sleep/hidden), attributed to
+      the card nearest the viewport centre. A live ``⏱`` counter joins the
+      tally; totals persist in localStorage beside the votes and export as
+      integer seconds: top-level ``time_total_seconds``, per item
+      ``time_seconds``. Pass ``False`` to opt a sheet out. Translate the
+      chip tooltip via ``ui_strings["timing_title"]``.
+
     Returns the full HTML document as a string.
     """
     screening_norm = None
@@ -1231,6 +1345,9 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
     extra_css = config.get("extra_css")
     if extra_css is not None and not isinstance(extra_css, str):
         raise TypeError("extra_css must be a string")
+    timing = config.get("timing", True)
+    if not isinstance(timing, bool):
+        raise TypeError("timing must be a bool")
     facets = _normalize_facets(config.get("facets"))
     facet_count_label = str(config.get("facet_count_label", "showing {shown} of {total}"))
     facet_reset_label = str(config.get("facet_reset_label", "clear facets"))
@@ -1302,6 +1419,8 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
         doc = _add_facets(doc, facets, facet_count_label, facet_reset_label)
     if extra_css:
         doc = _add_extra_css(doc, extra_css)
+    if timing:
+        doc = _add_timing(doc)
     doc = _localize(doc, config.get("ui_strings"))
     # Last, on the finished document: the script-purity and citation checks must see
     # exactly what the reviewer will see, translations and all.
