@@ -5,6 +5,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-08-16
+
+### Added
+
+- **V14 export context — decisions payloads carry their provenance (`config["context"]`, `extras=True` only).** Born from the H2707 crosswalk-gate hand-in (MG, 16-08-2026): «почему в скачанном .json нет главного, H2707 для опознания к кому он принадлежит?» A small str→scalar mapping (recommended keys: `handoff`, `repo`, `apply_with`) now rides verbatim as a top-level `context` field in EVERY exported decisions payload — download, autosave, strict, and V12 hand-in — and is shown in the header beside `sheet_id`, so both the file and the page answer whose sheet this is. Default off; validated shape; additive string surgery applied after all payload-producing layers; the donor byte-identical path never gets it. Tests: `tests/test_export_context.py`.
+
 ## [0.12.0] - 2026-08-16
 
 ### Added

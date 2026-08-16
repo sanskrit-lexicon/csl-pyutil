@@ -19,6 +19,6 @@ from csl_pyutil import anatomy, evidence
 from csl_pyutil.evidence import EvidenceManifest, PreflightError, PreflightWarning, preflight
 from csl_pyutil.review_sheet import render_review_sheet, esc, mark_cyrillic, RU_UI_STRINGS
 
-__version__ = "0.12.0"
+__version__ = "0.13.0"
 __all__ = ["render_review_sheet", "esc", "mark_cyrillic", "RU_UI_STRINGS", "anatomy", "evidence",
            "EvidenceManifest", "PreflightError", "PreflightWarning", "preflight"]
