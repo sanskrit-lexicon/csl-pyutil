@@ -5,6 +5,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-08-16
+
+### Added
+
+- **`<meta name="generator">` tag, `extras=True` only ([H2854](https://github.com/gasyoun/Uprava/blob/main/handoffs/H2854-Sonnet_Uprava_vote-platform-w1-build_15.08.26.md) step 1).**
+  Every render stamps `<meta name="generator" content="csl-pyutil/{__version__}">`
+  right after the color-scheme meta, before `<title>`. This is the whole
+  mechanism the vote hub's weekly CI staleness check (gasyoun.github.io) needs
+  to tell whether a published sheet is stale against the latest csl-pyutil
+  release tag — a plain string read, no repo-side bookkeeping.
+- **V13 identity gate — `config["identity_gate"]`, `PreflightError` (H2854
+  step 2).** MG, gating the BookIndex crosswalk sheets (H2841/H2842): a card
+  that names an internal id (`acc001`, `ch04`, …) without also naming the
+  human identity behind it lets a reviewer vote on a bare token. Deterministic,
+  no heuristics: every regex match in `config["identity_gate"]["patterns"]`
+  found in a card's tag-stripped `question` must have a
+  `config["identity_gate"]["labels"]` entry, and that label's text must itself
+  occur in the same question. A defective card raises `PreflightError` naming
+  it; an absent `identity_gate` emits a `PreflightWarning` (same migration-ramp
+  shape as V9's manifest warning — an error in 1.0.0). **Named V13, not the
+  plan's original "V12"**: [H2858](https://github.com/gasyoun/Uprava/blob/main/handoffs/H2858-Opus_csl-pyutil_review-sheet-partial-submit-pause-timer_15.08.26.md)
+  merged the same day and already claimed V12 for the partial hand-in + pause
+  layer (v0.11.0) — this build takes the plan's own ambiguity-contract default
+  (decision 14, default+log) rather than colliding with a shipped feature.
+- **`RU_UI_STRINGS` — a ready-made Russian chrome preset (H2854 step 2,
+  decision 8).** `csl_pyutil.review_sheet.RU_UI_STRINGS` (also
+  `csl_pyutil.RU_UI_STRINGS`) translates every `UI_STRINGS` key that exists as
+  of this release except `save_banner` — that key's default body bakes in the
+  caller's actual `sheet_id`/`save_as` values before `_localize` runs, so a
+  fixed replacement string would silently drop them rather than translate
+  them; see the constant's docstring for the one-line override a generator
+  using `save_as` needs. One line enables a whole sheet:
+  `config["ui_strings"] = RU_UI_STRINGS`.
+- **Mobile layer — one `@media (max-width: 640px)` block, `extras=True` only,
+  always on (H2854 step 2, decision 12).** Buttons ≥44px, panels single-column,
+  a compressed sticky header, wrapping filter chips. No JS, no config flag —
+  a curator voting from a phone should not need one.
+
 ## [0.11.0] - 2026-08-15
 
 ### Added

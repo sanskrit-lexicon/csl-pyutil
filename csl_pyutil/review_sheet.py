@@ -33,9 +33,9 @@ import warnings
 
 from csl_pyutil.evidence import PreflightError, PreflightWarning, preflight
 
-__version__ = "0.11.0"
+__version__ = "0.12.0"
 
-__all__ = ["render_review_sheet", "esc", "mark_cyrillic"]
+__all__ = ["render_review_sheet", "esc", "mark_cyrillic", "RU_UI_STRINGS"]
 
 
 def esc(s):
@@ -540,6 +540,34 @@ def _add_font_scale(doc, scale):
     doc = doc.replace(anchor, _FONT_SCALE_HTML + anchor, 1)
     return doc.replace("})();\n</script>",
                        _FONT_SCALE_JS % {"fs": ("%g" % scale)} + "})();\n</script>", 1)
+
+
+# ----------------------------------------------------------------------------- mobile layer (H2854 step 2)
+# Decision 12 (plan): a plain @media block, always-emitted for every
+# extras=True sheet, no JS, no opt-out — a curator voting from a phone should
+# not need a config flag to get tappable controls. Sizes are left in absolute
+# px (not routed through --fs) since ≥44px is a touch-target floor, not a
+# type-scale preference.
+_MOBILE_CSS = '''  @media (max-width: 640px) {
+    header.top { padding: 10px 14px; flex-direction: column; align-items: stretch; }
+    header.top h1 { font-size: 15px; }
+    .tally { gap: 8px; font-size: 11px; }
+    .toolbar { padding: 8px 14px; }
+    main { padding: 8px 12px; }
+    .card { padding: 12px; }
+    .filterbar { flex-wrap: wrap; }
+    button.dl, button.vote, button.rate, .fsctl button, #saveBtn, #handinBtn, #pauseBtn {
+      min-height: 44px; min-width: 44px; padding: 10px 14px;
+    }
+    .controls { flex-wrap: wrap; }
+    .panel { padding: 8px 10px; }
+    textarea.note { min-height: 60px; }
+  }
+'''
+
+
+def _add_mobile_css(doc):
+    return doc.replace("</style>", _MOBILE_CSS + "</style>", 1)
 
 
 # ----------------------------------------------------------------------------- H1847 facets
@@ -1143,6 +1171,59 @@ UI_STRINGS = {
 }
 
 
+#: Ready-made Russian preset (H2854 step 2, decision 8) — enable a whole sheet's
+#: chrome with one line, ``config["ui_strings"] = RU_UI_STRINGS`` (merge in
+#: overrides with ``RU_UI_STRINGS | {...}``, Python 3.9+, or
+#: ``dict(RU_UI_STRINGS, **overrides)``). Covers every ``UI_STRINGS`` key that
+#: exists as of this release (12, not the plan's original 8 — H2858 landed the
+#: same day and added four V12 hand-in/pause keys the plan predates; the ramp
+#: rule this build follows is "translate whatever UI_STRINGS holds now", so a
+#: future layer that adds a 13th key is the thing that goes stale, not this one).
+#:
+#: Deliberately excluded: ``save_banner``. Unlike every other key, its default
+#: body is not constant chrome — ``_add_standard`` bakes the caller's actual
+#: ``sheet_id``/``save_as`` values into that HTML before ``_localize`` ever
+#: runs, so a fixed replacement string would silently drop them rather than
+#: translate them. A generator that passes ``config["save_as"]`` under
+#: ``RU_UI_STRINGS`` and wants that banner translated too supplies its own
+#: ``save_banner`` override built from its actual values:
+#: ``RU_UI_STRINGS | {"save_banner": "... %s ..." % (sheet_id, save_as, sheet_id)}``.
+#: ``footer_hint``'s a/r/d legend below is the same shape in miniature (the
+#: caller's ``approve_label``/``reject_label`` text is baked in too) but is low
+#: stakes enough — it is a keyboard-shortcut hint, not a data field a later
+#: session parses — that this preset accepts the approximation of translating
+#: the shortcut key's ACTION ("одобрить"/"отклонить"/"отложить") rather than
+#: echoing back the caller's exact button wording.
+RU_UI_STRINGS = {
+    "download_button": "Скачать decisions.json",
+    "save_button": "Сохранить в папку…",
+    "footer_hint": (
+        'Клавиши: <kbd>a</kbd> одобрить &middot; <kbd>r</kbd> отклонить &middot; '
+        '<kbd>d</kbd> отложить &middot; <kbd>&darr;</kbd>/<kbd>&uarr;</kbd> дальше/назад. '
+        'Голоса сохраняются автоматически в localStorage браузера; нажмите '
+        '«Скачать decisions.json», когда закончите (непроголосованные пункты '
+        'экспортируются с decision:null).'
+    ),
+    "legend": (
+        '<b>Одобрить</b> — принять предложенное изменение/ответ на карточке как есть '
+        '(нет отдельного «одобрить как есть» — одобрение значит согласие с написанным). '
+        '<b>Отклонить</b> — оставить текущую запись/ответ без изменений. '
+        '<b>Отложить</b> — пока не уверен(а), решить позже. Поле заметки — для запроса '
+        'частичной правки вместо полного отклонения.'
+    ),
+    "defer_button": "Отложить",
+    "reject_reason_label": "Причина",
+    "timing_title": "активное время на этом листе (пока вкладка видима)",
+    "handin_button": "Сдать что успел(а)",
+    "handin_title": (
+        'остановить таймер и экспортировать сделанные голоса; остальное останется '
+        'сохранённым в этом браузере'
+    ),
+    "pause_title": "поставить таймер на паузу — перерыв не считается временем ревью",
+    "handin_said": "сдано {n} из {total} — таймер остановлен, остальное сохранено в этом браузере",
+}
+
+
 def _localize(doc, ui_strings):
     """Replace emitter chrome with caller-supplied translations.
 
@@ -1276,6 +1357,98 @@ _V9_NO_MANIFEST = (
 _PREFLIGHT_KEYS = ("allow_slp1_tokens", "overlap_threshold", "skip_prior_art")
 
 
+# ----------------------------------------------------------------------------- meta generator (H2854 step 1)
+# The vote hub's weekly CI staleness check (gasyoun.github.io) needs a way to
+# tell, from a published sheet's HTML alone, which csl-pyutil version rendered
+# it — without any repo-side bookkeeping. A <meta name="generator"> tag is the
+# standard place static-site tooling already puts this, so the check is a
+# one-line string compare against the latest GitHub release tag, no parsing.
+# extras=True only: the donor byte-identical path (extras=False) never gets it.
+def _add_generator_meta(doc):
+    anchor = '<meta name="color-scheme" content="dark">'
+    if anchor not in doc:
+        raise ValueError("review-sheet color-scheme meta anchor is missing")
+    tag = '\n<meta name="generator" content="csl-pyutil/%s">' % __version__
+    return doc.replace(anchor, anchor + tag, 1)
+
+
+# ----------------------------------------------------------------------------- V13 identity gate (H2854 step 2)
+# MG, gating the BookIndex crosswalk sheets (H2841/H2842): a card that names an
+# internal id (acc001, ch04, …) without also naming the human identity behind
+# it lets a reviewer vote on a bare token — the acc001 lesson. V9/V10 already
+# gate a sheet's right to exist on evidence-reuse and non-decision share; this
+# gate is the same shape (deterministic, PreflightError, PreflightWarning ramp)
+# for identity: every internal-id regex match in a card's question must have a
+# labels[] entry, and that label text must itself appear in the same question —
+# proving the card actually SAYS what the id means, not just holds a mapping
+# somewhere the reviewer never sees. Named V13, not the plan's "V12": H2858
+# (merged same day) already claimed V12 for the partial hand-in + pause layer,
+# so this build defaults to the next free slot per the plan's ambiguity
+# contract (decision 14, default+log) rather than colliding with a shipped
+# feature.
+_V13_NO_IDENTITY_GATE = (
+    "render_review_sheet(sheet_id=%r) was called with extras=True and no "
+    "config['identity_gate'] (V13, H2854), so nothing checked whether every "
+    "internal id a card's question mentions also names its real-world identity "
+    "before a reviewer votes (the acc001 lesson, H2841/H2842). Pass "
+    "config['identity_gate'] = {'patterns': [regex, ...], 'labels': {match: "
+    "label, ...}}. This is a migration ramp for the pre-H2854 generators, not a "
+    "permanent posture: it becomes an error in csl-pyutil 1.0.0. Escalate it "
+    "today with -W error::csl_pyutil.review_sheet.PreflightWarning."
+)
+
+_TAG_STRIP = re.compile(r"<[^>]+>")
+
+
+def _check_identity(items, gate, sheet_id, extras):
+    """V13 — deterministic identity gate, no heuristics.
+
+    ``gate['patterns']`` is a list of regex strings run against each item's
+    ``question`` with tags stripped (so markup around an id cannot dodge the
+    match). Every distinct match across all patterns must have a
+    ``gate['labels'][match]`` entry, and that label's text must itself occur in
+    the same stripped question — a mapping the reviewer never sees does not
+    count. A match with no label, or a label absent from the question, is a
+    ``PreflightError`` finding naming the card id. ``gate=None`` skips the
+    check entirely for ``extras=False`` (donor fidelity) and warns for
+    ``extras=True`` (the same migration-ramp shape as V9's manifest warning).
+    """
+    if gate is None:
+        if extras:
+            warnings.warn(_V13_NO_IDENTITY_GATE % sheet_id,
+                          PreflightWarning, stacklevel=3)
+        return
+    if not isinstance(gate, dict):
+        raise TypeError("config['identity_gate'] must be a mapping")
+    patterns = gate.get("patterns")
+    labels = gate.get("labels")
+    if not patterns:
+        raise ValueError(
+            "config['identity_gate']['patterns'] must be a non-empty list of regex strings")
+    if not isinstance(labels, dict):
+        raise TypeError("config['identity_gate']['labels'] must be a mapping")
+    compiled = [re.compile(p) for p in patterns]
+    findings = []
+    for it in items:
+        text = _TAG_STRIP.sub(" ", it.get("question") or "")
+        matched = set()
+        for rx in compiled:
+            matched.update(m.group(0) for m in rx.finditer(text))
+        for match in sorted(matched):
+            label = labels.get(match)
+            if label is None:
+                findings.append(
+                    "%s: internal id %r matched in the question but has no "
+                    "config['identity_gate']['labels'] entry" % (it.get("id"), match))
+            elif label not in text:
+                findings.append(
+                    "%s: internal id %r maps to label %r, but that label text "
+                    "does not appear in the card's question"
+                    % (it.get("id"), match, label))
+    if findings:
+        raise PreflightError(findings)
+
+
 def _check_non_decisions(items, threshold):
     """V10 — a sheet that is mostly non-decisions must not be written.
 
@@ -1365,6 +1538,17 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
         Default **0.0**: a card the machine has answered does not belong on a
         human's plate at all. Over the threshold raises ``PreflightError``. A
         sheet whose items carry no such flag is unaffected.
+
+    config["identity_gate"]: **V13 (H2854)** — ``{"patterns": [regex, ...],
+        "labels": {match: label, ...}}``. Deterministic, no heuristics: every
+        distinct regex match against a card's tag-stripped ``question`` must
+        have a ``labels`` entry, and that label's text must itself appear in
+        the same question — the acc001 lesson (H2841/H2842), a reviewer must
+        not be able to vote on a bare internal id. A defective card raises
+        ``PreflightError`` naming it. Absent ``identity_gate``: a
+        ``PreflightWarning`` (same migration-ramp shape as V9's manifest
+        warning, becomes an error in 1.0.0). Named V13, not V12 — H2858 (same
+        day) already shipped V12 for the partial hand-in + pause layer.
     config["strict_review"]: optional mapping enabling an additive strict
         decisions export. ``reviewer`` supplies the initial reviewer ID;
         ``require_all_votes`` and ``require_reject_note`` default to True.
@@ -1459,6 +1643,23 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
       ``ui_strings["handin_button"|"handin_title"|"pause_title"|"handin_said"]``
       (``handin_said`` keeps its ``{n}``/``{total}`` placeholders).
 
+    Localization preset (H2854 step 2, decision 8): ``csl_pyutil.review_sheet.
+    RU_UI_STRINGS`` (also importable as ``csl_pyutil.RU_UI_STRINGS``) is a
+    ready-made Russian translation of every ``UI_STRINGS`` chrome key except
+    ``save_banner`` (see its own docstring for why). Enable with one line:
+    ``config["ui_strings"] = RU_UI_STRINGS``.
+
+    Mobile layer (H2854 step 2, decision 12, ``extras=True`` only — always on,
+    no config flag): one ``@media (max-width: 640px)`` block — buttons ≥44px,
+    panels single-column, a compressed sticky header, wrapping filter chips.
+    No JS.
+
+    Meta generator (H2854 step 1, ``extras=True`` only): every render stamps
+    ``<meta name="generator" content="csl-pyutil/{__version__}">`` right after
+    the color-scheme meta, so the vote hub's weekly CI staleness check
+    (gasyoun.github.io) can compare a published sheet against the latest
+    csl-pyutil release tag with a plain string read.
+
     Returns the full HTML document as a string.
     """
     screening_norm = None
@@ -1476,6 +1677,9 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
 
     # V10 first: a sheet that should not exist is not worth rendering.
     _check_non_decisions(items, config.get("non_decision_share", 0.0))
+    # V13 (H2854): every internal id named in a card's question must also name
+    # its human identity — same call site as V10, before any HTML is built.
+    _check_identity(items, config.get("identity_gate"), config.get("sheet_id"), extras)
 
     show_ids = bool(config.get("show_ids", False))
     rating = config.get("rating")
@@ -1551,6 +1755,11 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
         # reproduce a pre-H779 shell's historical output.
         return _evidence_gate(doc, manifest, config, extras=False)
 
+    # H2854 step 1: stamp the render version so the vote-hub CI staleness check
+    # (gasyoun.github.io) can compare a published sheet against the latest
+    # csl-pyutil release tag with a plain string read, no repo-side bookkeeping.
+    doc = _add_generator_meta(doc)
+
     # H1649: inject screening banner + CSS before extras polish.
     banner = _screening_banner_html(screening_norm)
     if "</style>" in doc:
@@ -1581,6 +1790,7 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
     if reject_labels:
         doc = _add_reject_labels(doc, reject_labels, strict=strict is not None)
     doc = _add_font_scale(doc, float(font_scale))
+    doc = _add_mobile_css(doc)
     if facets is not None:
         doc = _add_facets(doc, facets, facet_count_label, facet_reset_label)
     if extra_css:

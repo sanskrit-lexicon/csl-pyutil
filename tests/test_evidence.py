@@ -28,7 +28,11 @@ def _config(**overrides):
            "filters": [("a", "A")], "generated": "2026-07-29",
            # the repo scan is exercised on its own below; the wiring tests do not
            # need to walk a checkout
-           "preflight": {"skip_prior_art": True}}
+           "preflight": {"skip_prior_art": True},
+           # this file is about V9/V10; neutralize the unrelated V13 identity-gate
+           # warning (H2854) so it does not add a second recorded warning here —
+           # V13 gets its own tests/test_identity_gate.py
+           "identity_gate": {"patterns": [r"nomatch\d+"], "labels": {}}}
     cfg.update(overrides)
     return cfg
 
