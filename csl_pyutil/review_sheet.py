@@ -33,7 +33,7 @@ import warnings
 
 from csl_pyutil.evidence import PreflightError, PreflightWarning, preflight
 
-__version__ = "0.12.0"
+__version__ = "0.13.0"
 
 __all__ = ["render_review_sheet", "esc", "mark_cyrillic", "RU_UI_STRINGS"]
 
@@ -1372,6 +1372,40 @@ def _add_generator_meta(doc):
     return doc.replace(anchor, anchor + tag, 1)
 
 
+# ----------------------------------------------------------------------------- V14 export context (H2707 gate lesson)
+# MG, handing in a partial of the BookIndex crosswalk sheet (16-08-2026):
+# «почему в скачанном .json нет главного, H2707 для опознания к кому он
+# принадлежит?» — a decisions.json that names only its sheet_id forces the
+# human (and any later session) to remember which handoff/repo/apply-command
+# the file belongs to. config["context"] is a small JSON mapping (recommended
+# keys: handoff, repo, apply_with — free-form) that (a) rides verbatim as
+# "context" in EVERY export payload — download, autosave, strict, hand-in —
+# and (b) is shown in the header next to sheet_id, so both the file and the
+# page answer "чей это лист". Additive string surgery on the finished
+# document, applied AFTER all payload-producing layers so one replace_all
+# covers them; extras=True only — the donor byte-identical path never gets it.
+def _add_export_context(doc, context):
+    payload_anchor = "sheet_id: SHEET_ID,"
+    if payload_anchor not in doc:
+        raise ValueError("review-sheet export payload anchor is missing")
+    doc = doc.replace(payload_anchor, "sheet_id: SHEET_ID, context: CONTEXT,")
+    var_anchor_start = "  var SHEET_ID = "
+    i = doc.find(var_anchor_start)
+    if i < 0:
+        raise ValueError("review-sheet SHEET_ID declaration anchor is missing")
+    line_end = doc.index(";\n", i) + 1
+    doc = (doc[:line_end]
+           + "\n  var CONTEXT = %s;" % json.dumps(context, ensure_ascii=False)
+           + doc[line_end:])
+    # header shows the same identity the file will carry
+    label = esc(" · ".join("%s %s" % (k, v) for k, v in context.items()))
+    probe = doc.find("sheet_id <code>")
+    if probe >= 0:
+        close = doc.index("</code>", probe) + len("</code>")
+        doc = doc[:close] + " &middot; <code>%s</code>" % label + doc[close:]
+    return doc
+
+
 # ----------------------------------------------------------------------------- V13 identity gate (H2854 step 2)
 # MG, gating the BookIndex crosswalk sheets (H2841/H2842): a card that names an
 # internal id (acc001, ch04, …) without also naming the human identity behind
@@ -1660,6 +1694,18 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
     (gasyoun.github.io) can compare a published sheet against the latest
     csl-pyutil release tag with a plain string read.
 
+    Export context (V14, ``extras=True`` only — default off):
+
+    - ``config["context"]`` (mapping of str → scalar, e.g. ``{"handoff":
+      "H2707", "repo": "gasyoun/BookIndex", "apply_with": "python
+      scripts/…/apply_gate_decisions.py"}``): rides verbatim as a top-level
+      ``context`` field in EVERY exported decisions payload — download,
+      autosave, strict, hand-in — and is shown in the header beside
+      ``sheet_id``. Born from the H2707 gate hand-in (16-08-2026): a
+      decisions.json naming only its sheet_id does not say which handoff,
+      repo, or apply command it belongs to. Appliers should treat it as
+      opaque provenance (read, verify, never require).
+
     Returns the full HTML document as a string.
     """
     screening_norm = None
@@ -1715,6 +1761,15 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
     timing = config.get("timing", True)
     if not isinstance(timing, bool):
         raise TypeError("timing must be a bool")
+    context = config.get("context")
+    if context is not None:
+        if not isinstance(context, dict) or not context:
+            raise TypeError("context must be a non-empty mapping (e.g. "
+                            "{'handoff': 'H2707', 'repo': 'gasyoun/BookIndex'})")
+        for k, v in context.items():
+            if not isinstance(k, str) or not isinstance(v, (str, int, float)):
+                raise TypeError("context keys must be str and values scalar "
+                                "(str/int/float); got %r: %r" % (k, v))
     hand_in = config.get("hand_in", True)
     if not isinstance(hand_in, bool):
         raise TypeError("hand_in must be a bool")
@@ -1805,6 +1860,10 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
                           rating_on=rating is not None,
                           reject_labels_on=bool(reject_labels),
                           strict_on=config.get("strict_review") is not None)
+    if context is not None:
+        # After every payload-producing layer (V8 autosave, strict, V12 hand-in):
+        # one replace_all then covers all export sites.
+        doc = _add_export_context(doc, context)
     doc = _localize(doc, config.get("ui_strings"))
     # Last, on the finished document: the script-purity and citation checks must see
     # exactly what the reviewer will see, translations and all.
