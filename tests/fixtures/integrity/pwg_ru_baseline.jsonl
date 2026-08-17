@@ -1,0 +1,6 @@
+{"key1":"agni","subcard":"agni-1","sense_tag":"s1","de":"Feuer","reviewer":"gasyoun","review_status":"human_ok","human_review":{"decision":"approve","notes":"","reviewed_at":"2026-07-26T07:08:03"}}
+{"key1":"agni","subcard":"agni-2","sense_tag":"s2","de":"Gott des Feuers","reviewer":"","review_status":"ai_translated"}
+{"key1":"vac","subcard":"vac-1","sense_tag":"s1","de":"Rede","review_status":"ai_edited","editorial_decision":"keep","editorial_decision_at":"2026-08-01T10:00:00","editorial_decision_source":"pilot"}
+{"key1":"vac","subcard":"vac-2","sense_tag":"s1","de":"Wort","review_status":"ai_edited"}
+{"key1":"dah","subcard":"dah-1","sense_tag":"s3","de":"brennen","reviewer":null,"review_status":"ai_reviewed"}
+{"key1":"dah","subcard":"dah-1","sense_tag":"s3","de":"verbrennen","review_status":""}

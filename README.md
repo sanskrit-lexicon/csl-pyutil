@@ -1,6 +1,6 @@
 # csl-pyutil
 
-_Created: 14-07-2026 · Last updated: 06-08-2026_
+_Created: 14-07-2026 · Last updated: 17-08-2026_
 
 Generic (non-Sanskrit-specific) Python helpers shared across the CDSL /
 Sanskrit-Lexicon repos. Distinct from
@@ -195,6 +195,46 @@ The sheet's naming, placement (gitignored `review/`), GTD `@DO` line, and
 function only produces the HTML string. See
 [`~/.claude/commands/review-sheet.md`](https://github.com/gasyoun/claude-config/blob/main/commands/review-sheet.md)
 for the full process.
+
+## `integrity_tripwire` — a committed checksum on human-reviewed data
+
+```sh
+python -m csl_pyutil.integrity_tripwire --check   --pin data/integrity/<store>.pin.json
+python -m csl_pyutil.integrity_tripwire --extract --pin data/integrity/<store>.pin.json \
+       --write-pin --reason "what changed and why"
+```
+
+Three repos have each lost human review work to an automated writer that left a
+file that still parsed: csl-atlas's `--reseed` drops every preserved ruling,
+eleven WhitneyRoots `apply_*` scripts open `src/app_data.json` with `'w'` and no
+lock, and pwg_ru's own review-applying script is unlocked and un-gated. Nobody
+noticed for months, because nothing was watching. This module is what watches.
+
+It hashes a **projection** — only the key fields and the reviewed fields of the
+rows a store's predicate calls reviewed — so a reformat, a reorder, or an edit
+to unreviewed content is invisible, and a dropped `reviewer` stamp is not. A
+whole-file SHA-256 was tried first and cried wolf (a 1.29 MB serializer shrink
+at an identical row count), which is how it came to be ignored. Two digests:
+`overlay_sha256` for *did the reviewed content change*, `keyset_sha256` for
+*did the reviewed row set change* — an in-place overwrite moves only the first,
+a deleted row only the second.
+
+The rule for "a row is reviewed" is **data, not code**: it lives in the `spec`
+block of each pin, copied from the org census, because the three stores share no
+review stamp. pwg_ru has `reviewer`/`review_status`/`editorial_decision*`;
+csl-atlas needs `reviewStatus` **and** a human `reviewer` (137 of its 147
+status-reviewed rows are agent-attributed, so status alone over-claims human
+review 14.7×); WhitneyRoots has no per-row stamp at all and is reviewed
+file-level.
+
+CI runs `--check` and **fails** on a mismatch. A legitimate change regenerates
+the pin in the same commit with a one-line `reason` — that is the whole
+acknowledgement ritual. Exit codes: `0` match, `1` tripwire, `2` broken spec
+(a defect must not be able to look like a clean store).
+
+Gitignored stores (pwg_ru's live 26 MB JSONL) commit a derived `--extract`
+projection instead, so CI can check what it cannot see. The live bytes never
+enter git.
 
 ## Tests
 

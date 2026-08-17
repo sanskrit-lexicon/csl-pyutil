@@ -1,0 +1,7 @@
+{"sense_tag": "s2", "subcard": "agni-2", "key1": "agni", "de": "Gott des Feuers (rev. B)", "reviewer": "", "review_status": "ai_translated", "pipeline_version": "v9"}
+{"key1":"nava","subcard":"nava-1","sense_tag":"s1","de":"neu","review_status":"ai_translated"}
+{ "key1" : "vac" , "subcard" : "vac-1" , "sense_tag" : "s1" , "de" : "Rede, Sprache" , "review_status" : "ai_edited" , "editorial_decision" : "keep" , "editorial_decision_at" : "2026-08-01T10:00:00" , "editorial_decision_source" : "pilot" }
+{"key1":"dah","subcard":"dah-1","sense_tag":"s3","de":"brennen","reviewer":null,"review_status":"ai_reviewed","pc_all":[41,42]}
+{"human_review":{"reviewed_at":"2026-07-26T07:08:03","notes":"","decision":"approve"},"review_status":"human_ok","reviewer":"gasyoun","de":"Feuer, Agni","sense_tag":"s1","subcard":"agni-1","key1":"agni"}
+{"key1":"dah","subcard":"dah-1","sense_tag":"s3","de":"verbrennen","review_status":""}
+{"key1":"vac","subcard":"vac-2","sense_tag":"s1","de":"Wort","review_status":"ai_edited"}

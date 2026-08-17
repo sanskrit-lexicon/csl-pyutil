@@ -1,0 +1,50 @@
+{
+  "metadata": {
+    "source": "Whitney, The Roots, Verb-Forms and Primary Derivatives",
+    "built": "2026-08-16"
+  },
+  "lexicon": [
+    {
+      "id": 1,
+      "root": "aṃś",
+      "link": "https://example.invalid/whitney/1",
+      "meaning": "attain",
+      "classes": ["5"],
+      "ppp": "aṣṭa",
+      "grammar_ref": "W.1",
+      "ppp_attestation": "RV",
+      "ppp_uncertain": false,
+      "ppp_note": "",
+      "infinitives": ["aṣṭum"]
+    },
+    {
+      "id": 2,
+      "root": "akṣ",
+      "link": "https://example.invalid/whitney/2",
+      "meaning": "reach",
+      "classes": ["1"],
+      "ppp": "aṣṭa",
+      "grammar_ref": "W.2",
+      "ppp_attestation": "",
+      "ppp_uncertain": true,
+      "ppp_note": "apparatus only",
+      "infinitives": []
+    },
+    {
+      "id": 3,
+      "root": "agh",
+      "link": "https://example.invalid/whitney/3",
+      "meaning": "be distressed",
+      "classes": [],
+      "ppp": "",
+      "grammar_ref": "W.3",
+      "ppp_attestation": "",
+      "ppp_uncertain": false,
+      "ppp_note": "",
+      "infinitives": []
+    }
+  ],
+  "indices": {
+    "by_class": {}
+  }
+}

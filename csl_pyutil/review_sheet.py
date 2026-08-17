@@ -33,7 +33,7 @@ import warnings
 
 from csl_pyutil.evidence import PreflightError, PreflightWarning, preflight
 
-__version__ = "0.14.0"
+__version__ = "0.15.0"
 
 __all__ = ["render_review_sheet", "esc", "mark_cyrillic", "RU_UI_STRINGS"]
 
