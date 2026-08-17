@@ -1,0 +1,62 @@
+{
+  "generated": "2026-08-17T06:00:00Z",
+  "queue": "gender-conflicts",
+  "count": 5,
+  "items": [
+    {
+      "queue": "gender-conflicts",
+      "reviewId": "gc-0001",
+      "lemma": "agni",
+      "proposal": "m.",
+      "reviewStatus": "pending",
+      "reviewedValue": null,
+      "reviewer": null,
+      "reviewedAt": null,
+      "note": ""
+    },
+    {
+      "queue": "gender-conflicts",
+      "reviewId": "gc-0002",
+      "lemma": "vac",
+      "proposal": "n.",
+      "reviewStatus": "pending",
+      "reviewedValue": null,
+      "reviewer": null,
+      "reviewedAt": null,
+      "note": ""
+    },
+    {
+      "queue": "gender-conflicts",
+      "reviewId": "gc-0003",
+      "lemma": "dah",
+      "proposal": "m.",
+      "reviewStatus": "reviewed-ok",
+      "reviewedValue": "m.",
+      "reviewer": "codex",
+      "reviewedAt": "2026-08-03T08:00:00Z",
+      "note": "agent pass"
+    },
+    {
+      "queue": "gender-conflicts",
+      "reviewId": "gc-0004",
+      "lemma": "nava",
+      "proposal": "n.",
+      "reviewStatus": "reviewed-corrected",
+      "reviewedValue": "adj.",
+      "reviewer": "Antigravity",
+      "reviewedAt": "2026-08-03T08:02:00Z",
+      "note": "agent pass"
+    },
+    {
+      "queue": "gender-conflicts",
+      "reviewId": "gc-0005",
+      "lemma": "jala",
+      "proposal": "n.",
+      "reviewStatus": "pending",
+      "reviewedValue": null,
+      "reviewer": null,
+      "reviewedAt": null,
+      "note": ""
+    }
+  ]
+}
