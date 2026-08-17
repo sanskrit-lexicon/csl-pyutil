@@ -33,7 +33,7 @@ import warnings
 
 from csl_pyutil.evidence import PreflightError, PreflightWarning, preflight
 
-__version__ = "0.13.0"
+__version__ = "0.14.0"
 
 __all__ = ["render_review_sheet", "esc", "mark_cyrillic", "RU_UI_STRINGS"]
 
@@ -1076,6 +1076,376 @@ def _add_handin(doc, generated_json, *, timing, rating_on, reject_labels_on, str
     return doc.replace("})();\n</script>", js + "})();\n</script>", 1)
 
 
+# ----------------------------------------------------------------------------- V15 session flow (H2887)
+# MG, curating the private sheet 16-08-2026: «Когда я сохраняю решения, таймер
+# должен останавливаться. Сейчас этого не происходит. Как ещё оптимизировать
+# опыт голосования?» Reading the code rather than the symptom found TWO defects,
+# the second heavier than the reported one:
+#
+# 1. **The clock does not stop on export.** V12 (H2858) wrote `__timePauseSet(true)`
+#    into the `handinBtn` handler ONLY. The main `downloadBtn` (plain and under
+#    `strict_review`) and the `saveBtn` file-picker leave the clock running, so the
+#    semantics are inside out: the PARTIAL exit stops the clock, the FULL one does not.
+# 2. **Silent misvote — vote-data corruption.** `a`/`r`/`d` target `vis[activeIdx]`,
+#    and `activeIdx` moved on ARROW KEYS ONLY: there was no scroll handler and no
+#    focus ring. Scroll to card 40 with the mouse, press `a`, and the vote lands on
+#    whatever card the arrows last pointed at, off-screen, with no warning — while
+#    V11's clock bills the time to the card at the viewport centre (`__timeActiveId()`).
+#    Two layers disagreeing about "the current card" is how a vote silently lands on
+#    the wrong row.
+#
+# V15 is the opt-out layer that fixes both and adds the rhythm the same interview
+# asked for (12 forks, `/ask` 16-08-2026): one "current card" shared by the clock and
+# the keys, a visible ring on it, a pause STATE (running | manual | export | idle)
+# instead of a bare boolean, auto-rearm on any sign of continued voting, a 90 s idle
+# auto-pause, auto-advance to the next undecided card, undo, a progress bar with a
+# median-based ETA, and resume-at-the-first-undecided on load.
+#
+# Named **V15**, not the plan's "V14": V14 shipped the same day as the export-context
+# layer, so this build takes the next free slot per the plan's ambiguity contract
+# (take the default, log it) rather than colliding with a released feature — exactly
+# what H2854 did when the plan's "V12" was already taken by H2858.
+#
+# Two constraints this layer is written around, both already paid for by H2858:
+#
+# * **Never probe a neighbouring layer with `typeof`.** The emitter knows at build
+#   time which layers are on; `test_timing_opt_out` / `test_handin_survives_timing_off`
+#   assert the ABSENCE of those identifiers from the document. So every clock-touching
+#   line here is emitted only when `config["timing"]` is on, and every `__pauseShow()`
+#   call only when `config["hand_in"]` is on too (that is the layer that defines it).
+# * **Never repeat the shared `note: rec.note || ''` literal**, which `_add_timing`
+#   rewrites wherever it finds it. This layer produces no export payload at all, so
+#   it carries neither that literal nor `sheet_id: SHEET_ID,` (V14's replace-all target).
+#
+# One logged default the interview did not decide: the implementation layer says
+# "autosave is an export too", but the debounced autosave writes after EVERY vote
+# once a file handle is armed — pausing the clock there would leave it frozen for
+# the whole sitting, one second after each vote. So the clock stops on the export
+# GESTURES (Download / Save to folder… / Hand in what I got) and not on the
+# background autosave writes those gestures schedule.
+_FLOW_IDLE_SECONDS = 90
+
+_FLOW_CSS = '''  .card.kbd-active { outline:2px solid var(--accent); outline-offset:3px; }
+  .tally .tstate { color:var(--muted); font-size:.85em; margin-left:4px; }
+  .tally .tstate.idle { color:var(--defer); }
+  .flowprog { display:inline-flex; align-items:center; gap:8px; color:var(--muted); font-size:12px; }
+  .flowprog .bar { display:inline-block; width:120px; height:6px; border-radius:3px;
+                   background:var(--panel2); border:1px solid var(--border); overflow:hidden; }
+  .flowprog .bar i { display:block; height:6px; background:var(--accent); width:0; }
+  .dl.flowundo { background:#243447; }
+  .flowtoast { position:fixed; left:50%; bottom:24px; transform:translateX(-50%);
+               background:var(--panel2); border:1px solid var(--border); color:var(--text);
+               padding:8px 14px; border-radius:8px; font-size:13px; z-index:50;
+               opacity:0; pointer-events:none; transition:opacity .18s; }
+  .flowtoast.on { opacity:1; }
+'''
+
+_FLOW_HTML = ('<button type="button" class="dl flowundo" id="flowUndoBtn" '
+              'title="undo the last decision (z)">&#8630; Undo</button>\n  '
+              '<span class="flowprog" id="flowProg">'
+              '<span class="bar"><i id="flowBar"></i></span>'
+              '<span id="flowProgText"></span><span id="flowEta"></span></span>\n  ')
+
+_FLOW_TOAST_HTML = '<div class="flowtoast" id="flowToast" role="status"></div>\n'
+
+#: The clock state machine V15 installs over V12's bare boolean. `pause_reason`
+#: rides in the SAME persisted `TIME_KEY` record as `paused`, so it survives a
+#: closed tab; a record written before this layer has no reason at all and is
+#: read back as **manual** — a curator who paused yesterday must not find the
+#: clock has restarted itself overnight.
+_FLOW_PAUSE_STATE_OLD = '''  var __timePaused = !!__timing.paused;
+  function __timePauseSet(v) {
+    __timePaused = !!v; __timing.paused = __timePaused; __timeLast = Date.now(); __timeFlush();
+  }
+'''
+_FLOW_PAUSE_STATE_NEW = '''  var __timePaused = !!__timing.paused;
+  // V15 (H2887): a legacy record carries `paused` and no reason — read it as
+  // manual, so an auto-rearm can never lift a pause the curator set by hand.
+  var __timePauseReason = __timePaused ? (__timing.pause_reason || 'manual') : null;
+  function __timePauseSet(v, reason) {
+    __timePaused = !!v;
+    __timing.paused = __timePaused;
+    __timePauseReason = __timePaused ? (reason || 'manual') : null;
+    __timing.pause_reason = __timePauseReason;
+    __timeLast = Date.now(); __timeFlush();
+  }
+'''
+_FLOW_HANDIN_STOP_OLD = "    __timePauseSet(true); __pauseShow();\n"
+_FLOW_HANDIN_STOP_NEW = "    __timePauseSet(true, 'export'); __pauseShow();\n"
+
+
+def _session_flow_js(*, timing, pause_ui, facets_on):
+    """The V15 controller, emitted for exactly the layers this sheet has."""
+    pause_show = "    __pauseShow();\n" if pause_ui else ""
+    # `facetbar` is named only when that layer is on — a facet-less sheet's
+    # contract is that the identifier is absent from the document entirely
+    # (test_facets_absent_leaves_document_untouched), the same shape as
+    # test_timing_opt_out. Build-time knowledge again, never a runtime probe.
+    bar_ids = "'filterbar', 'facetbar'" if facets_on else "'filterbar'"
+    if timing:
+        center = "  var __flowCenterId = __timeActiveId;\n"
+    else:
+        # No clock on this sheet, so no `__timeActiveId` to borrow — the same
+        # nearest-to-viewport-centre rule, written out once here. Either way the
+        # sheet has exactly ONE definition of "the current card".
+        center = '''  function __flowCenterId() {
+    var mid = window.innerHeight / 2, best = null, bestd = Infinity;
+    var vis = visibleCards();
+    for (var i = 0; i < vis.length; i++) {
+      var r = vis[i].getBoundingClientRect();
+      if (r.bottom < 0 || r.top > window.innerHeight) continue;
+      var c = (Math.max(r.top, 0) + Math.min(r.bottom, window.innerHeight)) / 2;
+      var d = Math.abs(c - mid);
+      if (d < bestd) { bestd = d; best = vis[i]; }
+    }
+    return best ? best.getAttribute('data-id') : null;
+  }
+'''
+    if timing:
+        clock = '''  function __flowClockShow() {
+    var el = document.getElementById('t-state');
+    if (!el) return;
+    var label = FLOW_CLOCK_RUNNING;
+    if (__timePaused) label = (__timePauseReason === 'idle') ? FLOW_CLOCK_IDLE : FLOW_CLOCK_PAUSED;
+    el.textContent = label;
+    el.classList.toggle('idle', !!__timePaused && __timePauseReason === 'idle');
+  }
+''' + ('''  // The V12 ⏸ button drives the clock straight through __timePauseSet, so the
+  // three-state label has to ride along with V12's own repaint or it goes stale
+  // the moment the curator pauses by hand.
+  var __flowOrigPauseShow = __pauseShow;
+  __pauseShow = function () { __flowOrigPauseShow(); __flowClockShow(); };
+''' if pause_ui else "") + '''  var __flowIdleTimer = null;
+  function __flowIdleArm() {
+    clearTimeout(__flowIdleTimer);
+    __flowIdleTimer = setTimeout(function () {
+      if (__timePaused) return;
+      __timePauseSet(true, 'idle');
+''' + pause_show + '''      __flowClockShow();
+    }, FLOW_IDLE_SECONDS * 1000);
+  }
+  function __flowRearm() {
+    if (__timePaused && __timePauseReason !== 'manual') {
+      __timePauseSet(false);
+''' + pause_show + '''    }
+    __flowClockShow();
+    __flowIdleArm();
+  }
+  // The export GESTURES, caught in the capture phase on `document` so this runs
+  // before any handler bound to the buttons themselves — including the strict
+  // layer's, which calls stopImmediatePropagation() on its own element.
+  document.addEventListener('click', function (e) {
+    var t = e.target;
+    if (!t || !t.closest || !t.closest('#downloadBtn, #saveBtn, #handinBtn')) return;
+    __timePauseSet(true, 'export');
+''' + pause_show + '''    __flowClockShow();
+  }, true);
+  ['keydown', 'pointerdown', 'scroll'].forEach(function (evt) {
+    document.addEventListener(evt, function () { __flowRearm(); }, true);
+  });
+'''
+        eta = '''  function __flowEtaText(decided, total) {
+    var secs = [];
+    ids.forEach(function (id) {
+      if (!(state[id] && state[id].decision)) return;
+      var s = __timing.per[id] || 0;
+      if (s > 0) secs.push(s);
+    });
+    if (!secs.length) return '';
+    secs.sort(function (a, b) { return a - b; });
+    var mid = Math.floor(secs.length / 2);
+    var med = (secs.length % 2) ? secs[mid] : (secs[mid - 1] + secs[mid]) / 2;
+    var left = Math.max(0, total - decided);
+    if (!left) return '';
+    var minutes = Math.max(1, Math.round(med * left / 60));
+    return (secs.length >= 5 ? FLOW_ETA : FLOW_ETA_ROUGH).replace('{minutes}', minutes);
+  }
+'''
+        eta_call = '''    var etaEl = document.getElementById('flowEta');
+    if (etaEl) etaEl.textContent = __flowEtaText(n, total);
+'''
+        init_clock = "  __flowClockShow();\n  __flowIdleArm();\n"
+        clock_strings = ('''  var FLOW_IDLE_SECONDS = ''' + str(_FLOW_IDLE_SECONDS) + ''';
+  var FLOW_ETA = 'about {minutes} min left';
+  var FLOW_ETA_ROUGH = 'about {minutes} min left (rough)';
+  var FLOW_CLOCK_RUNNING = 'running';
+  var FLOW_CLOCK_PAUSED = 'paused';
+  var FLOW_CLOCK_IDLE = 'idle';
+''')
+    else:
+        clock = "  function __flowRearm() {}\n"
+        eta = ""
+        eta_call = ""
+        init_clock = ""
+        # A sheet with no clock has no idle threshold, no ETA and no clock
+        # state to name; emitting the constants anyway would put timing chrome
+        # into a document whose contract is that it has none.
+        clock_strings = ""
+    return '''
+  // --- V15 session flow (H2887) ---------------------------------------------
+''' + clock_strings + '''  var FLOW_PROGRESS = 'decided {n} of {total}';
+  var FLOW_UNDO_SAID = 'undo: {id} back to {decision}';
+  var FLOW_UNDO_EMPTY = 'nothing to undo';
+  var FLOW_UNDO_NONE = 'no decision';
+  var FLOW_RESUMED = 'resumed at card {n} of {total}';
+  var __flowToast = document.getElementById('flowToast');
+  var __flowToastTimer = null;
+  function __flowSay(text) {
+    if (!__flowToast) return;
+    __flowToast.textContent = text;
+    __flowToast.classList.add('on');
+    clearTimeout(__flowToastTimer);
+    __flowToastTimer = setTimeout(function () { __flowToast.classList.remove('on'); }, 2600);
+  }
+''' + center + '''  function __flowIdxOf(id) {
+    var vis = visibleCards();
+    for (var i = 0; i < vis.length; i++) {
+      if (vis[i].getAttribute('data-id') === id) return i;
+    }
+    return -1;
+  }
+  function __flowCardById(id) {
+    var found = null;
+    cardsEl.forEach(function (c) { if (c.getAttribute('data-id') === id) found = c; });
+    return found;
+  }
+  // The visible ring IS the target of a/r/d — that identity is the whole point
+  // of this layer, so nothing may move `activeIdx` without repainting.
+  function __flowPaint() {
+    cardsEl.forEach(function (c) { c.classList.remove('kbd-active'); });
+    var vis = visibleCards();
+    if (!vis.length) return;
+    if (activeIdx >= vis.length) activeIdx = vis.length - 1;
+    if (activeIdx < 0) activeIdx = 0;
+    vis[activeIdx].classList.add('kbd-active');
+  }
+  function __flowSync() {
+    var id = __flowCenterId();
+    if (id) { var at = __flowIdxOf(id); if (at !== -1) activeIdx = at; }
+    __flowPaint();
+  }
+  var __flowScrollTimer = null;
+  window.addEventListener('scroll', function () {
+    if (__flowScrollTimer) return;
+    __flowScrollTimer = setTimeout(function () { __flowScrollTimer = null; __flowSync(); }, 120);
+  });
+  // Both bars reset `activeIdx` to 0 as they re-filter; re-derive it from the
+  // viewport on the next tick, or defect 2 returns wearing a filter.
+  [''' + bar_ids + '''].forEach(function (barId) {
+    var bar = document.getElementById(barId);
+    if (bar) bar.addEventListener('click', function () { setTimeout(__flowSync, 0); });
+  });
+''' + clock + '''  var __flowUndoStack = [];
+  function __flowUndo() {
+    var last = __flowUndoStack.pop();
+    if (!last) { __flowSay(FLOW_UNDO_EMPTY); return; }
+    state[last.id] = state[last.id] || {};
+    if (last.prev) state[last.id].decision = last.prev;
+    else delete state[last.id].decision;
+    save();
+    var card = __flowCardById(last.id);
+    if (card) {
+      applyCardUI(card);
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      var at = __flowIdxOf(last.id);
+      if (at !== -1) activeIdx = at;
+      __flowPaint();
+    }
+    __flowSay(FLOW_UNDO_SAID.replace('{id}', last.id)
+      .replace('{decision}', last.prev || FLOW_UNDO_NONE));
+  }
+  var __flowUndoBtn = document.getElementById('flowUndoBtn');
+  if (__flowUndoBtn) __flowUndoBtn.addEventListener('click', __flowUndo);
+  function __flowFirstUndecided() {
+    var vis = visibleCards();
+    for (var i = 0; i < vis.length; i++) {
+      var id = vis[i].getAttribute('data-id');
+      if (!(state[id] && state[id].decision)) return i;
+    }
+    return -1;
+  }
+  function __flowAdvance() {
+    var at = __flowFirstUndecided();
+    if (at === -1) { __flowPaint(); return; }
+    activeIdx = at;
+    visibleCards()[at].scrollIntoView({ behavior: 'smooth', block: 'center' });
+    __flowPaint();
+  }
+  function __flowDecided() {
+    var n = 0;
+    ids.forEach(function (id) { if (state[id] && state[id].decision) n++; });
+    return n;
+  }
+''' + eta + '''  function __flowProgress() {
+    var n = __flowDecided(), total = ids.length;
+    var txt = document.getElementById('flowProgText');
+    if (txt) txt.textContent = FLOW_PROGRESS.replace('{n}', n).replace('{total}', total);
+    var bar = document.getElementById('flowBar');
+    if (bar) bar.style.width = (total ? Math.round(100 * n / total) : 0) + '%';
+''' + eta_call + '''  }
+  var __flowOrigTally = tally;
+  tally = function () { __flowOrigTally(); __flowProgress(); };
+  var __flowOrigVote = vote;
+  vote = function (id, d) {
+    var rec = state[id] || {};
+    __flowUndoStack.push({ id: id, prev: rec.decision || null });
+    if (__flowUndoStack.length > 100) __flowUndoStack.shift();
+    __flowOrigVote(id, d);
+    __flowRearm();
+    __flowAdvance();
+  };
+  var __flowOrigNote = noteChange;
+  noteChange = function (id, t) { __flowOrigNote(id, t); __flowRearm(); };
+  document.addEventListener('keydown', function (e) {
+    if (e.target.tagName === 'TEXTAREA') return;
+    if (e.key === 'z' || e.key === 'Z') { __flowUndo(); e.preventDefault(); return; }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') __flowPaint();
+  });
+  __flowProgress();
+  __flowSync();
+''' + init_clock + '''  (function () {
+    if (!__flowDecided()) return;
+    var at = __flowFirstUndecided();
+    if (at === -1) return;
+    var vis = visibleCards();
+    activeIdx = at;
+    vis[at].scrollIntoView({ block: 'center' });
+    __flowPaint();
+    __flowSay(FLOW_RESUMED.replace('{n}', at + 1).replace('{total}', vis.length));
+  })();
+'''
+
+
+def _add_session_flow(doc, *, timing, pause_ui, facets_on):
+    """V15 — applied AFTER V11 timing and V12 hand-in (it drives both) and before
+    V14 export context (which replace-alls a payload literal this layer never
+    contains)."""
+    doc = doc.replace("</style>", _FLOW_CSS + "</style>", 1)
+    toolbar_anchor = '<div class="filterbar"'
+    if toolbar_anchor not in doc:
+        raise ValueError("review-sheet filterbar anchor is missing")
+    doc = doc.replace(toolbar_anchor, _FLOW_HTML + toolbar_anchor, 1)
+    if "</body>" not in doc:
+        raise ValueError("review-sheet body anchor is missing")
+    doc = doc.replace("</body>", _FLOW_TOAST_HTML + "</body>", 1)
+    if timing:
+        if _FLOW_PAUSE_STATE_OLD not in doc:
+            raise ValueError("review-sheet pause-state anchor is missing")
+        doc = doc.replace(_FLOW_PAUSE_STATE_OLD, _FLOW_PAUSE_STATE_NEW, 1)
+        state_anchor = '<span class="count" id="t-total">0:00</span></span>'
+        if state_anchor not in doc:
+            raise ValueError("review-sheet timing chip anchor is missing")
+        doc = doc.replace(
+            state_anchor,
+            '<span class="count" id="t-total">0:00</span>'
+            '<span class="tstate" id="t-state"></span></span>', 1)
+        # V12 stopped the clock with no reason; under V15 a bare stop means
+        # `manual`, which auto-rearm must never lift — so name it.
+        doc = doc.replace(_FLOW_HANDIN_STOP_OLD, _FLOW_HANDIN_STOP_NEW, 1)
+    js = _session_flow_js(timing=timing, pause_ui=pause_ui, facets_on=facets_on)
+    return doc.replace("})();\n</script>", js + "})();\n</script>", 1)
+
+
 def _add_standard(doc, *, save_as=None, sheet_id=None, note_min_height_px=None, rating=None):
     """Apply the 19-07-2026 standard layers. Each is independent surgery on a
     stable core-template anchor; nothing here touches _CORE_TEMPLATE itself."""
@@ -1168,6 +1538,36 @@ UI_STRINGS = {
         r'(?P<body>pause the clock — a break is not review time)(?P<post>">)'),
     "handin_said": re.compile(
         r"(?P<pre>var HANDIN_SAID = ')(?P<body>[^']*)(?P<post>';)"),
+    # V15 session flow (present unless config["session_flow"] is False). The
+    # toast/progress/ETA sentences are assembled in JS, so each lives as one
+    # single-quoted literal with {n}/{total}/{minutes}/{id}/{decision}
+    # placeholders — a translation keeps the placeholders and needs no JS.
+    # `flow_eta*` and `flow_clock_*` are emitted only when config["timing"] is
+    # on; a sheet without a clock simply never matches those patterns.
+    "flow_undo_button": re.compile(
+        r'(?P<pre>id="flowUndoBtn" title="[^"]*">&#8630; )(?P<body>Undo)(?P<post></button>)'),
+    "flow_undo_title": re.compile(
+        r'(?P<pre>id="flowUndoBtn" title=")(?P<body>undo the last decision \(z\))(?P<post>">)'),
+    "flow_progress": re.compile(
+        r"(?P<pre>var FLOW_PROGRESS = ')(?P<body>[^']*)(?P<post>';)"),
+    "flow_eta": re.compile(
+        r"(?P<pre>var FLOW_ETA = ')(?P<body>[^']*)(?P<post>';)"),
+    "flow_eta_rough": re.compile(
+        r"(?P<pre>var FLOW_ETA_ROUGH = ')(?P<body>[^']*)(?P<post>';)"),
+    "flow_undo_said": re.compile(
+        r"(?P<pre>var FLOW_UNDO_SAID = ')(?P<body>[^']*)(?P<post>';)"),
+    "flow_undo_empty": re.compile(
+        r"(?P<pre>var FLOW_UNDO_EMPTY = ')(?P<body>[^']*)(?P<post>';)"),
+    "flow_undo_none": re.compile(
+        r"(?P<pre>var FLOW_UNDO_NONE = ')(?P<body>[^']*)(?P<post>';)"),
+    "flow_resumed": re.compile(
+        r"(?P<pre>var FLOW_RESUMED = ')(?P<body>[^']*)(?P<post>';)"),
+    "flow_clock_running": re.compile(
+        r"(?P<pre>var FLOW_CLOCK_RUNNING = ')(?P<body>[^']*)(?P<post>';)"),
+    "flow_clock_paused": re.compile(
+        r"(?P<pre>var FLOW_CLOCK_PAUSED = ')(?P<body>[^']*)(?P<post>';)"),
+    "flow_clock_idle": re.compile(
+        r"(?P<pre>var FLOW_CLOCK_IDLE = ')(?P<body>[^']*)(?P<post>';)"),
 }
 
 
@@ -1221,6 +1621,20 @@ RU_UI_STRINGS = {
     ),
     "pause_title": "поставить таймер на паузу — перерыв не считается временем ревью",
     "handin_said": "сдано {n} из {total} — таймер остановлен, остальное сохранено в этом браузере",
+    # V15 session flow (H2887). Placeholders are preserved verbatim, as in
+    # handin_said. No apostrophes: these land inside single-quoted JS literals.
+    "flow_undo_button": "Отменить",
+    "flow_undo_title": "отменить последнее решение (z)",
+    "flow_progress": "решено {n} из {total}",
+    "flow_eta": "осталось ≈{minutes} мин",
+    "flow_eta_rough": "осталось ≈{minutes} мин (оценка грубая)",
+    "flow_undo_said": "отменено: {id} → {decision}",
+    "flow_undo_empty": "отменять нечего",
+    "flow_undo_none": "решения не было",
+    "flow_resumed": "продолжили с карточки {n} из {total}",
+    "flow_clock_running": "идут",
+    "flow_clock_paused": "пауза",
+    "flow_clock_idle": "простой",
 }
 
 
@@ -1677,6 +2091,44 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
       ``ui_strings["handin_button"|"handin_title"|"pause_title"|"handin_said"]``
       (``handin_said`` keeps its ``{n}``/``{total}`` placeholders).
 
+    Session flow (V15, H2887, ``extras=True`` only — default ON):
+
+    - ``config["session_flow"]`` (bool, default True): the voting-session layer.
+      It fixes two defects the curator's «сохраняю решения, таймер не
+      останавливается» surfaced (16-08-2026), the second of which nobody had
+      reported:
+
+      * **The clock now stops on every export**, not just on hand-in. V12 wrote
+        the stop into ``handinBtn`` alone, so the PARTIAL exit stopped the clock
+        and the FULL one («Download decisions.json», the strict variant, the
+        file-picker) did not. The pause is now a STATE — ``running`` /
+        ``manual`` / ``export`` / ``idle`` — persisted as ``pause_reason``
+        beside ``paused`` in ``TIME_KEY``; a record written before this layer
+        reads back as ``manual``. Any sign of continued voting (a vote, a note
+        edit, a keypress, a pointer press, a scroll) rearms the clock — unless
+        the pause was **manual**, which always wins. 90 s with no input pauses
+        it as ``idle``. The chip says which of the three states it is in. The
+        background autosave writes are deliberately NOT treated as exports (see
+        the layer comment): they fire after every vote, so pausing there would
+        freeze the clock for the whole sitting.
+      * **The silent misvote is gone.** ``a``/``r``/``d`` targeted
+        ``vis[activeIdx]``, and ``activeIdx`` moved on arrow keys only — scroll
+        to card 40 with the mouse, press ``a``, and the vote landed off-screen
+        while the clock billed the card at the viewport centre. Both now read
+        ONE current card (V11's ``__timeActiveId()`` when the clock is on, the
+        same nearest-to-centre rule written out when it is not), a throttled
+        scroll handler keeps it in step, a ``.card.kbd-active`` ring makes it
+        visible, and it is re-derived after any filter/facet click.
+
+      Plus the rhythm the same interview asked for: auto-advance to the next
+      undecided card after a vote, undo (``z`` or the ↶ button — it restores
+      the previous decision, including "there was none", and never touches the
+      clock), a progress bar with a median-based ETA that is marked rough until
+      five cards are decided, and resume-at-the-first-undecided with a toast on
+      load. Translate via ``ui_strings["flow_*"]`` (12 keys, all in
+      ``RU_UI_STRINGS``). Named V15, not the plan's V14 — the export-context
+      layer shipped as V14 the same day.
+
     Localization preset (H2854 step 2, decision 8): ``csl_pyutil.review_sheet.
     RU_UI_STRINGS`` (also importable as ``csl_pyutil.RU_UI_STRINGS``) is a
     ready-made Russian translation of every ``UI_STRINGS`` chrome key except
@@ -1773,6 +2225,9 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
     hand_in = config.get("hand_in", True)
     if not isinstance(hand_in, bool):
         raise TypeError("hand_in must be a bool")
+    session_flow = config.get("session_flow", True)
+    if not isinstance(session_flow, bool):
+        raise TypeError("session_flow must be a bool")
     facets = _normalize_facets(config.get("facets"))
     facet_count_label = str(config.get("facet_count_label", "showing {shown} of {total}"))
     facet_reset_label = str(config.get("facet_reset_label", "clear facets"))
@@ -1860,6 +2315,12 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
                           rating_on=rating is not None,
                           reject_labels_on=bool(reject_labels),
                           strict_on=config.get("strict_review") is not None)
+    if session_flow:
+        # After V11 and V12 — this layer drives the clock the first installed and
+        # the pause control the second installed — and before V14 export context,
+        # whose replace-all target this layer deliberately never contains.
+        doc = _add_session_flow(doc, timing=timing, pause_ui=timing and hand_in,
+                                facets_on=facets is not None)
     if context is not None:
         # After every payload-producing layer (V8 autosave, strict, V12 hand-in):
         # one replace_all then covers all export sites.

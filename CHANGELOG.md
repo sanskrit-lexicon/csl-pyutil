@@ -5,6 +5,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-08-16
+
+### Fixed
+
+- **The clock did not stop on export — the semantics were inside out ([H2887](https://github.com/gasyoun/Uprava/blob/main/handoffs/H2887-Opus_csl-pyutil_review-sheet-v14-clock-stop-misvote-fix-voting-ux_16.08.26.md)).** MG, curating the private sheet 16-08-2026: «Когда я сохраняю решения, таймер должен останавливаться. Сейчас этого не происходит.» V12 ([H2858](https://github.com/gasyoun/Uprava/blob/main/handoffs/archive/H2858-Opus_csl-pyutil_review-sheet-partial-submit-pause-timer_15.08.26.md)) wrote `__timePauseSet(true)` into the `handinBtn` handler **only**, so the PARTIAL exit («Hand in what I got») stopped the clock and the FULL one («Download decisions.json», the `strict_review` variant, the file-picker) did not — one `setInterval`, zero `clearInterval` in every published sheet.
+- **Silent misvote — vote-data corruption nobody had reported.** `a`/`r`/`d` targeted `vis[activeIdx]`, and `activeIdx` moved on **arrow keys only**: no scroll handler, no focus ring. Scroll to card 40 with the mouse, press `a`, and the vote landed on whatever card the arrows last pointed at, off-screen, with no warning — while V11's clock billed the time to the card at the viewport centre (`__timeActiveId()`). Two layers disagreeing about "the current card" is how a vote silently lands on the wrong row. Both defects lived in the canonical emitter on `main`, so **every** sheet ever built carried them.
+
+### Added
+
+- **V15 session flow — the voting-session layer (`config["session_flow"]`, `extras=True` only, default ON).** The opt-out layer that fixes both defects above and adds the rhythm the same `/ask` interview asked for (12 forks closed 16-08-2026; wave W1.5 of [PLAN_UPRAVA_VOTE_PLATFORM_2026Q3.md](https://github.com/gasyoun/Uprava/blob/main/docs/PLAN_UPRAVA_VOTE_PLATFORM_2026Q3.md), step layer [IMPLEMENTATION_UPRAVA_VOTE_PLATFORM_W15.md](https://github.com/gasyoun/Uprava/blob/main/docs/IMPLEMENTATION_UPRAVA_VOTE_PLATFORM_W15.md)):
+  - **Pause is a STATE, not a boolean.** `running` / `manual` / `export` / `idle`, persisted as `pause_reason` beside `paused` in the same `TIME_KEY` record, so it survives a closed tab. A record written before this layer has no reason and is read back as **manual** — a curator who paused yesterday must not find the clock restarted itself overnight.
+  - **Every export gesture stops the clock** (Download, Save to folder…, Hand in what I got), caught in the capture phase on `document` so it also covers the strict handler, which `stopImmediatePropagation()`s on its own element. The debounced background autosave writes are deliberately **not** treated as exports: they fire after every vote, so pausing there would freeze the clock for the whole sitting.
+  - **Auto-rearm on continued voting** — a vote, a note edit, a keypress, a pointer press or a scroll lifts an `export`/`idle` pause. A **manual** pause always wins and is never lifted automatically.
+  - **90 s idle auto-pause** (`FLOW_IDLE_SECONDS`, a named constant beside the layer), the largest source of inflated review time.
+  - **One current card** shared by the clock and the keys — V11's own `__timeActiveId()` when the clock is on, the same nearest-to-viewport-centre rule written out when it is not — kept in step by a throttled (120 ms) scroll handler, marked with a visible `.card.kbd-active` ring, and re-derived after any filter/facet click (both bars reset `activeIdx` to 0 as they re-filter, which is how the defect would otherwise return wearing a filter).
+  - **Rhythm:** auto-advance to the next undecided card after a vote · undo (`z` or the ↶ button) restoring the previous decision including "there was none", never touching the clock · a progress bar with a median-seconds-per-card ETA, marked rough until five cards are decided · resume at the first undecided card on load, with a toast · the clock chip naming which of the three states it is in.
+  - 12 new `UI_STRINGS` keys (`flow_*`), all present in `RU_UI_STRINGS`, placeholders (`{n}`/`{total}`/`{minutes}`/`{id}`/`{decision}`) preserved.
+  - Named **V15**, not the plan's "V14": the export-context layer shipped as V14 the same day, so this build takes the next free slot per the plan's ambiguity contract — the same move H2854 made when H2858 had already taken V12.
+  - Written under the two constraints H2858 paid for: no `typeof` probe of a neighbouring layer (every clock-touching line is emitted only when `config["timing"]` is on, every `__pauseShow()` call only when `config["hand_in"]` is on too, and `facetbar` is named only when that layer exists — three tests assert those identifiers are ABSENT from the document), and no repeat of the shared `note: rec.note || ''` literal that `_add_timing` rewrites. This layer produces no export payload at all, so it carries neither that literal nor V14's `sheet_id: SHEET_ID,` replace-all target.
+  - Tests: `tests/test_v15_session_flow.py` (43 cases, including `node --check` of the emitted script in six layer combinations: plain · timing_off · strict · rating+labels · everything · session_flow_off). No existing test was modified — the suite goes 130 → 173 green.
+
 ## [0.13.0] - 2026-08-16
 
 ### Added
