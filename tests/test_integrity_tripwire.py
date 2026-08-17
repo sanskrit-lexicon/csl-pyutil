@@ -441,6 +441,79 @@ def test_extract_written_as_lf_utf8_without_bom(tmp_path):
 
 
 # --------------------------------------------------------------------------
+# redaction — watch the field, publish nothing
+# --------------------------------------------------------------------------
+
+def test_redacted_field_is_a_digest_not_the_content():
+    got = project(
+        [{"k": "a", "human_review": {"notes": "секретная заметка куратора"}}],
+        ["k"],
+        ["human_review"],
+        redact_fields=["human_review"],
+    )
+    assert got[0]["human_review"].startswith("sha256:")
+    assert "куратора" not in json.dumps(got, ensure_ascii=False)
+
+
+def test_redaction_still_catches_a_one_character_change():
+    def digest(note):
+        return overlay_digest(
+            project([{"k": "a", "human_review": note}], ["k"], ["human_review"],
+                    redact_fields=["human_review"])
+        )
+
+    assert digest("approved") != digest("approvea")
+    assert digest("approved") == digest("approved")
+
+
+def test_redaction_does_not_hide_a_wiped_field():
+    """The shape a wipe leaves — field gone, or emptied — must still move."""
+    intact = project([{"k": "a", "human_review": {"decision": "approve"}}], ["k"],
+                     ["human_review"], redact_fields=["human_review"])
+    emptied = project([{"k": "a", "human_review": None}], ["k"],
+                      ["human_review"], redact_fields=["human_review"])
+    gone = project([{"k": "a"}], ["k"], ["human_review"], redact_fields=["human_review"])
+    assert overlay_digest(intact) != overlay_digest(emptied)
+    assert overlay_digest(emptied) == overlay_digest(gone)
+
+
+def test_a_key_field_cannot_be_redacted():
+    with pytest.raises(TripwireError) as exc:
+        project([{"k": "a"}], ["k"], ["k"], redact_fields=["k"])
+    assert "key field" in str(exc.value)
+
+
+def test_redacted_extract_round_trips_without_the_live_store(tmp_path):
+    """The pwg_ru shape end to end: redact, commit, check with the store gone."""
+    root = _repo(tmp_path, {"store.jsonl": "pwg_ru_baseline.jsonl"})
+    spec = _pwg_spec(extract_path="data/integrity/overlay.jsonl")
+    spec["redact_fields"] = ["human_review"]
+    _, projection = extract(spec, root=root)
+    out = os.path.join(root, spec["extract_path"])
+    it.write_extract(out, projection)
+    pin = _pin_at(root, spec)
+
+    published = io.open(out, encoding="utf-8").read()
+    assert "sha256:" in published
+    assert "reviewed_at" not in published, "no free-text payload may reach the extract"
+
+    os.remove(os.path.join(root, "store.jsonl"))
+    assert check(out, pin, root=root, report=[]) == 0
+
+
+def test_a_redacted_field_overwrite_is_still_red(tmp_path):
+    root = _repo(tmp_path, {"store.jsonl": "pwg_ru_baseline.jsonl"})
+    spec = _pwg_spec()
+    spec["redact_fields"] = ["human_review"]
+    pin = _pin_at(root, spec)
+
+    rows = it.load_records(os.path.join(root, "store.jsonl"), "jsonl")
+    rows[0]["human_review"] = {"decision": "reject", "notes": "", "reviewed_at": "x"}
+    it.write_extract(os.path.join(root, "store.jsonl"), rows)
+    assert check(None, pin, root=root, report=[]) == 1
+
+
+# --------------------------------------------------------------------------
 # multi-source stores
 # --------------------------------------------------------------------------
 

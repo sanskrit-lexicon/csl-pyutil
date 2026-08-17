@@ -125,12 +125,29 @@ def _sha256(payload):
     return hashlib.sha256(payload).hexdigest()
 
 
-def project(records, key_fields, reviewed_fields):
+def redact(value):
+    """Replace a value with a digest of itself: ``sha256:<hex>``.
+
+    The point is to keep a field *in* the tripwire while keeping its content
+    *out* of git. pwg_ru's ``human_review`` is a reviewed field — a wipe of it
+    is exactly what this module exists to catch — but it holds the curator's
+    verbatim free-text notes, and the committed extract lives in a PUBLIC repo
+    while the store it comes from is gitignored precisely because its bytes are
+    not published. Storing the digest keeps every wipe detectable and publishes
+    nothing: the hash moves the instant a single character does.
+    """
+    return "sha256:" + _sha256(canonical_bytes(value))
+
+
+def project(records, key_fields, reviewed_fields, redact_fields=()):
     """Reduce each record to its key fields plus its reviewed fields.
 
     ``reviewed_fields`` may be ``"*"`` (or ``["*"]``) for file-level stores
     whose whole record is the reviewed content — WhitneyRoots' crosswalks have
     no per-field review stamp, so narrowing them would be inventing one.
+
+    ``redact_fields`` names reviewed fields whose value is replaced by a digest
+    of itself, for content that must be watched but must not be committed.
 
     A key field missing from a record is a TripwireError, not a ``None``: a row
     that cannot be keyed cannot be tracked, and quietly keying it as null would
@@ -139,6 +156,12 @@ def project(records, key_fields, reviewed_fields):
     if reviewed_fields == "*":
         reviewed_fields = ["*"]
     star = list(reviewed_fields) == ["*"]
+    redact_fields = set(redact_fields or ())
+    if redact_fields & set(key_fields):
+        raise TripwireError(
+            "cannot redact a key field (%s) — the key set must stay legible"
+            % (", ".join(sorted(redact_fields & set(key_fields))),)
+        )
 
     out = []
     for index, record in enumerate(records):
@@ -163,6 +186,9 @@ def project(records, key_fields, reviewed_fields):
                 # shape a wipe leaves behind — so it is recorded as absent
                 # rather than skipped, and absence is part of the digest.
                 projected[field] = record.get(field, None)
+        for field in redact_fields:
+            if field in projected and projected[field] is not None:
+                projected[field] = redact(projected[field])
         out.append(projected)
     return out
 
@@ -323,6 +349,7 @@ def _source_settings(spec, source):
         source.get("container", spec.get("container", "json")),
         source.get("records_at", ""),
         source.get("reviewed_predicate", spec.get("reviewed_predicate")),
+        source.get("redact_fields", spec.get("redact_fields", ())),
     )
 
 
@@ -367,9 +394,14 @@ def extract(spec, root=".", records_by_source=None):
     combined = []
     for source in spec["sources"]:
         path = source["path"]
-        key_fields, reviewed_fields, container, records_at, predicate = _source_settings(
-            spec, source
-        )
+        (
+            key_fields,
+            reviewed_fields,
+            container,
+            records_at,
+            predicate,
+            redact_fields,
+        ) = _source_settings(spec, source)
         if records_by_source is not None and path in records_by_source:
             records = records_by_source[path]
         else:
@@ -379,7 +411,7 @@ def extract(spec, root=".", records_by_source=None):
             records = load_records(full, container, records_at)
 
         reviewed = [r for r in records if is_reviewed(r, predicate)]
-        projection = project(reviewed, key_fields, reviewed_fields)
+        projection = project(reviewed, key_fields, reviewed_fields, redact_fields)
         _assert_unique(projection, key_fields, path)
 
         per_source.append(
@@ -474,10 +506,13 @@ def check(extract_path, pin_path, root=".", report=None):
             spec["sources"][0]["path"]: load_records(extract_path, "jsonl")
         }
         # The extract is the reviewed set already; re-filtering it through the
-        # predicate would drop nothing but would fail file-level stores.
+        # predicate would drop nothing but would fail file-level stores. Its
+        # redacted fields are likewise already digests — hashing them a second
+        # time would produce a value nothing can reproduce.
         spec = dict(spec)
         spec["sources"] = [dict(spec["sources"][0])]
         spec["sources"][0]["reviewed_predicate"] = None
+        spec["sources"][0]["redact_fields"] = ()
         spec["sources"][0].pop("container", None)
 
     per_source, _ = extract(spec, root=root, records_by_source=records_by_source)

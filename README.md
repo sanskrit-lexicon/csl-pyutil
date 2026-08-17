@@ -234,7 +234,11 @@ acknowledgement ritual. Exit codes: `0` match, `1` tripwire, `2` broken spec
 
 Gitignored stores (pwg_ru's live 26 MB JSONL) commit a derived `--extract`
 projection instead, so CI can check what it cannot see. The live bytes never
-enter git.
+enter git: `redact_fields` names reviewed fields whose value is replaced by
+`sha256:<hex>` of itself, so a field like pwg_ru's `human_review` — the
+curator's verbatim free-text notes, watched precisely because a wipe of it is
+the failure mode — stays fully covered by the digest while publishing nothing
+into a public repo. The hash moves the instant a single character does.
 
 ## Tests
 
