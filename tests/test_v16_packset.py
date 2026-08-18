@@ -357,3 +357,26 @@ def test_pack_and_parent_have_balanced_script_tags():
     for doc in out["packs"] + [out["parent"]]:
         assert doc.count("<script>") == doc.count("</script>")
         assert doc.startswith("<!DOCTYPE html>")
+
+
+# --------------------------------------------------------------------- branch default (0.17.1)
+
+def test_inbox_names_no_branch_by_default():
+    """0.17.0 defaulted to 'main' and gasyoun/vote-inbox is on `master`, so the
+    first real save would have 404'd. Omitting `branch` lets the contents API
+    resolve the repo's own default."""
+    out = _packset(_n_items(11), github_inbox=_INBOX)
+    inbox = json.loads(re.search(r"var INBOX = (\{.*?\});", out["packs"][0]).group(1))
+    assert inbox["branch"] == ""
+    assert "if (INBOX.branch) msg.branch = INBOX.branch;" in out["packs"][0]
+
+
+def test_inbox_honours_an_explicit_branch():
+    out = _packset(_n_items(11), github_inbox=dict(_INBOX, branch="master"))
+    inbox = json.loads(re.search(r"var INBOX = (\{.*?\});", out["packs"][0]).group(1))
+    assert inbox["branch"] == "master"
+
+
+def test_inbox_read_omits_ref_when_no_branch_is_named():
+    out = _packset(_n_items(11), github_inbox=_INBOX)
+    assert "INBOX.branch ? '?ref=' + encodeURIComponent(INBOX.branch) : ''" in out["packs"][0]

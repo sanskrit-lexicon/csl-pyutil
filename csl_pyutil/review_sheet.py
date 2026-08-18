@@ -33,7 +33,7 @@ import warnings
 
 from csl_pyutil.evidence import PreflightError, PreflightWarning, preflight
 
-__version__ = "0.17.0"
+__version__ = "0.17.1"
 
 __all__ = ["render_review_sheet", "render_review_sheet_packset", "esc", "mark_cyrillic",
            "RU_UI_STRINGS"]
@@ -2148,14 +2148,19 @@ def _inbox_js(inbox, pack_no, card_questions):
     var enc = btoa(unescape(encodeURIComponent(body)));
     function send(sha) {
       var msg = { message: 'vote: ' + SHEET_ID + ' pack-' + INBOX.pack_name,
-                  content: enc, branch: INBOX.branch };
+                  content: enc };
+      // No branch unless the caller named one: the contents API then writes to the
+      // repo's OWN default branch. Defaulting to 'main' here shipped a bug in
+      // 0.17.0 — gasyoun/vote-inbox defaults to `master`, so the first real save
+      // would have 404'd on a branch that does not exist.
+      if (INBOX.branch) msg.branch = INBOX.branch;
       if (sha) msg.sha = sha;
       return fetch(url, { method:'PUT',
         headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json',
                    'Accept': 'application/vnd.github+json' },
         body: JSON.stringify(msg) });
     }
-    return fetch(url + '?ref=' + encodeURIComponent(INBOX.branch),
+    return fetch(url + (INBOX.branch ? '?ref=' + encodeURIComponent(INBOX.branch) : ''),
                  { headers: { 'Authorization': 'Bearer ' + token } })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (cur) { return send(cur && cur.sha); })
@@ -2233,7 +2238,9 @@ def _normalize_inbox(raw, pack_no, pack_total):
     device_url = str(raw.get("device_url", "") or "")
     return {
         "repo": repo,
-        "branch": str(raw.get("branch", "main")),
+        # Empty means "the repo's own default branch", which the contents API
+        # resolves for us. Never guess 'main': gasyoun/vote-inbox is on `master`.
+        "branch": str(raw.get("branch", "") or ""),
         "client_id": client_id,
         "device_url": device_url,
         "pack": pack_no,
