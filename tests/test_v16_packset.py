@@ -415,3 +415,15 @@ def test_ru_translates_the_pulling_hint():
     js = _packset(_n_items(11), github_inbox=_INBOX, ui_strings=RU_UI_STRINGS)["packs"][0]
     assert "подтягиваю голоса" in js
     assert "pulling votes from GitHub" not in js
+
+
+def test_packs_know_the_whole_instrument_size():
+    """V17's top bar and ETA are about the whole sheet, so each pack is told it."""
+    out = _packset(_n_items(22))
+    for pack in out["packs"]:
+        assert "var VOTE_TOTAL = 22;" in pack
+
+
+def test_a_single_pack_sheet_is_not_given_a_packset_total():
+    out = _packset(_n_items(10))
+    assert "var VOTE_TOTAL = 0;" in out["packs"][0]
