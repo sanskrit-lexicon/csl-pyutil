@@ -5,6 +5,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-08-18
+
+### Added
+
+- **The vote pull says it is happening ([H2991](https://github.com/gasyoun/Uprava/blob/main/handoffs/archive/H2991-Opus_csl-pyutil_vote-w3-packs-oauth_17.08.26.md) follow-up).** V16 hydration is two network hops, and the second — `raw.githubusercontent.com`, once per decisions file — is routinely slow to settle, sometimes past 10 s, while the `api.github.com` listing answers in about one. Measured 18-08-2026 during the live smoke: the first hydrate test **failed on a 20 s ceiling against completely correct code**. For a reviewer the effect is worse than a slow page — an unvoted sheet silently fills in a few seconds later, which reads as a bug and invites them to start voting on top of votes that are about to land.
+  - The inbox status line now shows `INBOX_PULLING` (**«подтягиваю голоса…»** under `RU_UI_STRINGS`, *pulling votes from GitHub…* in English) from **before** the first request, and replaces it with the existing pulled-N message on success.
+  - A pull that brings nothing **clears the line** rather than leaving the hint up: every terminal path reports, including an empty directory, a directory with no `.json`, and an outright network failure.
+  - The repaint (`save()` + `applyCardUI`) now runs only when something actually merged, instead of on every completion.
+  - New `UI_STRINGS` key `inbox_pulling`, translated in `RU_UI_STRINGS`. Four tests, including that the announcement is emitted *before* the fetch rather than after it resolves.
+
 ## [0.18.0] - 2026-08-18
 
 ### Added
