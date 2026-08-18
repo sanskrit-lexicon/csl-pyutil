@@ -33,7 +33,7 @@ import warnings
 
 from csl_pyutil.evidence import PreflightError, PreflightWarning, preflight
 
-__version__ = "0.18.0"
+__version__ = "0.19.0"
 
 __all__ = ["render_review_sheet", "render_review_sheet_packset", "esc", "mark_cyrillic",
            "RU_UI_STRINGS"]
@@ -1589,6 +1589,8 @@ UI_STRINGS = {
     "inbox_title": re.compile(
         r'(?P<pre>id="inboxBtn" title=")(?P<body>push this pack\'s ids and verdicts to '
         r'the public vote inbox)(?P<post>">)'),
+    "inbox_pulling": re.compile(
+        r"(?P<pre>var INBOX_PULLING = ')(?P<body>[^']*)(?P<post>';)"),
     "inbox_hydrated": re.compile(
         r"(?P<pre>var INBOX_HYDRATED = ')(?P<body>[^']*)(?P<post>';)"),
     "inbox_saved": re.compile(
@@ -1679,6 +1681,7 @@ RU_UI_STRINGS = {
     # V16 inbox (H2991). No apostrophes: these land inside single-quoted JS literals.
     "inbox_button": "Сохранить в GitHub",
     "inbox_title": "отправить id и вердикты этого пакета в публичный ящик голосов",
+    "inbox_pulling": "подтягиваю голоса…",
     "inbox_hydrated": "подтянуто {n} голос(ов) с GitHub",
     "inbox_saved": "пакет {pack} сохранён в GitHub",
     "inbox_disabled": "нет OAuth client_id / релея device-flow — используйте «Скачать decisions.json»",
@@ -2092,6 +2095,7 @@ def _inbox_js(inbox, pack_no, card_questions):
     return '''
   var INBOX = %(inbox_json)s;
   var CARD_Q = %(questions_json)s;
+  var INBOX_PULLING = 'pulling votes from GitHub…';
   var INBOX_HYDRATED = 'pulled {n} vote(s) from GitHub';
   var INBOX_SAVED = 'saved pack {pack} to GitHub';
   var INBOX_DISABLED = 'no OAuth client_id / device relay configured — use Download decisions.json';
@@ -2125,12 +2129,27 @@ def _inbox_js(inbox, pack_no, card_questions):
                return out;
              }) };
   }
+  // The pull is two network hops, and the second one -- raw.githubusercontent.com,
+  // once per decisions file -- is routinely slow to settle, sometimes past 10 s,
+  // while the api.github.com listing answers in about one. Measured 18-08-2026: the
+  // first hydrate smoke FAILED on a 20 s ceiling against completely correct code.
+  // Without a hint the reviewer sees an unvoted sheet that silently fills in later,
+  // which reads as a bug and invites them to start voting over the top of votes that
+  // are about to arrive. So say so while it is happening, and clear the line if the
+  // pull turns out to bring nothing.
   function __inboxHydrate() {
+    var said = false;
+    function announce() { if (!said) { said = true; __inboxSay(INBOX_PULLING); } }
+    function done(merged) {
+      if (merged) { __inboxSay(INBOX_HYDRATED.replace('{n}', merged)); return; }
+      if (said) __inboxSay('');
+    }
+    announce();
     fetch(__inboxDir()).then(function (r) { return r.ok ? r.json() : []; }).then(function (list) {
-      if (!Array.isArray(list) || !list.length) return;
+      if (!Array.isArray(list) || !list.length) { done(0); return; }
       var files = list.filter(function (f) { return /\\.json$/.test(f.name || ''); });
       var pending = files.length, merged = 0;
-      if (!pending) return;
+      if (!pending) { done(0); return; }
       files.forEach(function (f) {
         fetch(f.download_url).then(function (r) { return r.ok ? r.json() : null; })
           .then(function (doc) {
@@ -2146,13 +2165,14 @@ def _inbox_js(inbox, pack_no, card_questions):
           .catch(function () {})
           .then(function () {
             if (--pending > 0) return;
-            if (!merged) return;
-            save();
-            document.querySelectorAll('.card').forEach(function (c) { applyCardUI(c); });
-            __inboxSay(INBOX_HYDRATED.replace('{n}', merged));
+            if (merged) {
+              save();
+              document.querySelectorAll('.card').forEach(function (c) { applyCardUI(c); });
+            }
+            done(merged);
           });
       });
-    }).catch(function () {});
+    }).catch(function () { done(0); });
   }
   function __inboxPut(token) {
     var path = 'decisions/' + encodeURIComponent(SHEET_ID) + '/pack-' + INBOX.pack_name + '.json';

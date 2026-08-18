@@ -380,3 +380,38 @@ def test_inbox_honours_an_explicit_branch():
 def test_inbox_read_omits_ref_when_no_branch_is_named():
     out = _packset(_n_items(11), github_inbox=_INBOX)
     assert "INBOX.branch ? '?ref=' + encodeURIComponent(INBOX.branch) : ''" in out["packs"][0]
+
+
+# --------------------------------------------------------------------- pulling hint (0.19.0)
+
+def test_hydrate_announces_before_the_slow_hop():
+    """raw.githubusercontent.com routinely takes seconds; an unvoted sheet that
+    silently fills in later reads as a bug and invites double-voting."""
+    out = _packset(_n_items(11), github_inbox=_INBOX)
+    js = out["packs"][0]
+    assert "var INBOX_PULLING = 'pulling votes from GitHub…';" in js
+    assert "function announce() { if (!said) { said = true; __inboxSay(INBOX_PULLING); } }" in js
+    # announced BEFORE the first fetch, not after it resolves
+    body = re.search(r"function __inboxHydrate\(\)[\s\S]*?\n  \}", js).group(0)
+    assert body.index("announce();") < body.index("fetch(__inboxDir())")
+
+
+def test_hydrate_clears_the_hint_when_it_brings_nothing():
+    """An empty inbox must not leave 'pulling votes…' on screen forever."""
+    js = _packset(_n_items(11), github_inbox=_INBOX)["packs"][0]
+    assert "if (said) __inboxSay('');" in js
+    body = re.search(r"function __inboxHydrate\(\)[\s\S]*?\n  \}", js).group(0)
+    # every terminal path reports, including the outer failure
+    assert body.count("done(0)") >= 3
+    assert "}).catch(function () { done(0); });" in js
+
+
+def test_hydrate_only_repaints_when_something_merged():
+    js = _packset(_n_items(11), github_inbox=_INBOX)["packs"][0]
+    assert "if (merged) {\n              save();" in js
+
+
+def test_ru_translates_the_pulling_hint():
+    js = _packset(_n_items(11), github_inbox=_INBOX, ui_strings=RU_UI_STRINGS)["packs"][0]
+    assert "подтягиваю голоса" in js
+    assert "pulling votes from GitHub" not in js
