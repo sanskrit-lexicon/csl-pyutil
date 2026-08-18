@@ -33,7 +33,7 @@ import warnings
 
 from csl_pyutil.evidence import PreflightError, PreflightWarning, preflight
 
-__version__ = "0.19.1"
+__version__ = "0.20.0"
 
 __all__ = ["render_review_sheet", "render_review_sheet_packset", "esc", "mark_cyrillic",
            "RU_UI_STRINGS"]
@@ -1611,6 +1611,12 @@ UI_STRINGS = {
         r'(?P<pre><div class="sub">)(?P<body>Generated)(?P<post> )'),
     "doc_lang": re.compile(
         r'(?P<pre><html lang=")(?P<body>en)(?P<post>">)'),
+    "filter_all": re.compile(
+        r'(?P<pre><button data-filter="all" class="active">)(?P<body>all)'
+        r'(?P<post></button>)'),
+    "filter_unvoted": re.compile(
+        r'(?P<pre><button data-filter="unvoted">)(?P<body>unvoted only)'
+        r'(?P<post></button>)'),
 }
 
 
@@ -1690,6 +1696,8 @@ RU_UI_STRINGS = {
     "count_suffix": "карточек",
     "generated_label": "Собрано",
     "doc_lang": "ru",
+    "filter_all": "все",
+    "filter_unvoted": "только непроголосованные",
 }
 
 
