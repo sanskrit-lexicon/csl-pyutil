@@ -55,7 +55,7 @@ def __getattr__(name):
 def __dir__():
     return sorted(list(globals()) + list(_LAZY))
 
-__version__ = "0.15.0"
+__version__ = "0.16.0"
 __all__ = ["render_review_sheet", "esc", "mark_cyrillic", "RU_UI_STRINGS", "anatomy", "evidence",
            "EvidenceManifest", "PreflightError", "PreflightWarning", "preflight",
            "integrity_tripwire", "TripwireError", "project", "overlay_digest",

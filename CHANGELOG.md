@@ -5,6 +5,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-08-18
+
+### Added
+
+- **U7 — typology / classification labels must carry their count and population share ([H2846](https://github.com/gasyoun/Uprava/blob/main/handoffs/H2846-Sonnet_Uprava_review-sheet-typology-requires-statistics-standard_15.08.26.md), new universal row in [`docs/REVIEW_SHEET_CONTENT_STANDARD_2026.md`](https://github.com/gasyoun/Uprava/blob/main/docs/REVIEW_SHEET_CONTENT_STANDARD_2026.md)).** MG, reviewing the v2 re-glue card: «typology always needs to be supported by statistics, make it a general rule» — the card asked a reviewer to approve a typology whose distribution (1,534 restatements · 250 additions · 1 correction, ≈86% of everything glued onto PWG is PW abridging what PWG already said) was invisible on the card; a label with no denominator invites the reader to over-weight the rare class.
+  - New opt-in item field ``item["typology"] = [{"label", "n", "share"}, ...]`` (or ``"share_unknown": True``), rendered as ``.badge-typology`` chips distinct from plain ``badges`` — e.g. `restatement (n=1534, 86%)`. Omitting ``n`` or ``share`` raises ``PreflightError`` at build time (``_check_typology_stats``, same call site as V10/V13); items with no ``typology`` key are unaffected.
+  - Tests: `tests/test_typology_stats.py` (7 cases: renders label+count+share, `share_unknown` text, and a raise per missing field).
+  - Released as a **minor**: a new opt-in structural gate + rendering path, not a bugfix.
+
 ## [0.15.0] - 2026-08-17
 
 ### Added
