@@ -247,3 +247,40 @@ def test_defer_button_and_reject_reason_localise():
     assert 'class="rejectlabellabel"' in ru
     # the H779 legend's own "Defer" explanation is a different string and stays
     assert "<b>Defer</b>" in ru
+
+
+# ------------------------------------------------------- scratch dirs are not prior art (H2991)
+
+def test_scan_prior_art_skips_agent_worktrees(tmp_path):
+    """A scratch checkout is not prior art — it is the same art seen twice.
+
+    Measured 18-08-2026: two stale worktrees under `.claude/worktrees/` made the
+    500-card BLI gold sheet unbuildable with 13 blocking findings, every one a
+    COPY of a file the manifest had already declared.
+    """
+    from csl_pyutil.evidence import EvidenceManifest
+
+    # the scanner tokenizes on [A-Za-z~]{3,}, so ids must be letters
+    ids = ["rowid" + chr(ord("a") + i // 26) + chr(ord("a") + i % 26)
+           for i in range(60)]
+    body = "\n".join(ids)
+
+    real = tmp_path / "data"
+    real.mkdir()
+    (real / "crosswalk.tsv").write_text(body, encoding="utf-8")
+
+    for scratch in (".claude/worktrees/agent-abc/data",
+                    ".venv/lib/site-packages/pkg",
+                    "node_modules/thing",
+                    "build/lib/data"):
+        d = tmp_path / scratch
+        d.mkdir(parents=True)
+        (d / "crosswalk.tsv").write_text(body, encoding="utf-8")
+
+    man = EvidenceManifest(sheet_id="s", row_ids=ids, repo_root=str(tmp_path))
+    hits = [h[0] for h in man.scan_prior_art(threshold=0.5)]
+
+    assert "data/crosswalk.tsv" in hits, "the real artifact must still be found"
+    for bad in (".claude", ".venv", "node_modules", "build"):
+        assert not any(h.startswith(bad) for h in hits), \
+            "%s was scanned; scratch/dependency trees are not prior art (%s)" % (bad, hits)

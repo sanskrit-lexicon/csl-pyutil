@@ -216,6 +216,34 @@ def find_slp1(text, allow=()):
 
 
 # ---------------------------------------------------------------- the manifest
+#: Directories :meth:`EvidenceManifest.scan_prior_art` must not walk.
+#:
+#: The scanner answers "what else in this repo is keyed on these same rows?", and
+#: the answer is only meaningful for artifacts a reader could actually consult.
+#: A SCRATCH CHECKOUT IS NOT PRIOR ART — it is the same art seen twice. Measured
+#: 18-08-2026 (H2991): two stale agent worktrees under
+#: ``SanskritLexicography/.claude/worktrees/`` made the 500-card BLI gold sheet
+#: unbuildable, with 13 blocking findings that were all COPIES of files the
+#: manifest had already declared — the generator could not be re-run at all, and
+#: the failure blamed the sheet rather than the environment. The pruning list was
+#: ``.git``/``node_modules``/``__pycache__``/``review``, none of which covers an
+#: agent's own working directory.
+#:
+#: Everything here is either a VCS internal, a dependency tree, a build output, or
+#: an agent/tool scratch area. A repo that genuinely keeps evidence in one of these
+#: is misfiled, not mis-scanned.
+_SCAN_SKIP_DIRS = frozenset((
+    '.git', '.hg', '.svn',
+    'node_modules', '__pycache__', '.mypy_cache', '.pytest_cache', '.ruff_cache',
+    '.tox', '.nox', '.venv', 'venv', 'env', 'site-packages',
+    'dist', 'build', '.eggs',
+    # agent / tool scratch: worktrees and caches that mirror the repo's own files
+    '.claude', '.codex', '.grok', '.worktrees', '.idea', '.vscode',
+    # the emitted sheets themselves
+    'review',
+))
+
+
 class EvidenceManifest(object):
     """What the generator claims it looked at, joined, and deliberately left out.
 
@@ -277,8 +305,7 @@ class EvidenceManifest(object):
         bare = {i.split('~~')[0] for i in want}
         hits, seen = [], 0
         for root, dirs, files in os.walk(self.repo_root):
-            dirs[:] = [d for d in dirs
-                       if d not in ('.git', 'node_modules', '__pycache__', 'review')]
+            dirs[:] = [d for d in dirs if d not in _SCAN_SKIP_DIRS]
             for fn in files:
                 if not fn.endswith(exts):
                     continue
