@@ -5,6 +5,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-08-18
+
+### Added
+
+- **Three head/header chrome words `UI_STRINGS` never reached ([H2847](https://github.com/gasyoun/Uprava/blob/main/handoffs/H2847-Sonnet_Uprava_review-sheet-explanations-russian-only-and-jargon-expansion_15.08.26.md)).** `_CORE_TEMPLATE` bakes `"%(n)d items"` into both `<title>` and `<h1>`, `"Generated %(generated)s"` into the subtitle line, and `lang="en"` onto `<html>` — none reachable via `title`/`subtitle`/`footer`/`approve_label`/`reject_label`, so a fully card-translated Russian sheet still leaked English into the browser tab and the document's declared language. New keys `count_suffix`, `generated_label`, `doc_lang`; `RU_UI_STRINGS` carries all three (`"карточек"` / `"Собрано"` / `"ru"`). Two regression tests, one exercising the preset directly.
+
 ## [0.17.1] - 2026-08-18
 
 ### Fixed

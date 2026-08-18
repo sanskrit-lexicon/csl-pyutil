@@ -379,6 +379,35 @@ def test_ui_strings_translates_chrome():
     assert "</footer>" in out
 
 
+def test_ui_strings_translates_head_chrome():
+    """H2847 — "N items", "Generated ..." and lang="en" are baked into
+    _CORE_TEMPLATE's <head>/<header>, unreachable via title/subtitle/footer;
+    a fully-translated sheet still leaked them into the browser tab."""
+    out = render_review_sheet(_items(), _config(
+        ui_strings={
+            "count_suffix": "карточек",
+            "generated_label": "Собрано",
+            "doc_lang": "ru",
+        }))
+    assert "карточек</title>" in out
+    assert "карточек</h1>" in out
+    assert " items<" not in out
+    assert '<div class="sub">Собрано ' in out
+    assert ">Generated " not in out
+    assert '<html lang="ru">' in out
+    assert '<html lang="en">' not in out
+
+
+def test_ru_ui_strings_preset_covers_head_chrome():
+    """RU_UI_STRINGS is the ready-made preset — it must carry the H2847 keys too,
+    not just leave a caller to hand-roll them."""
+    from csl_pyutil.review_sheet import RU_UI_STRINGS
+    out = render_review_sheet(_items(), _config(ui_strings=RU_UI_STRINGS))
+    assert '<html lang="ru">' in out
+    assert "карточек</h1>" in out
+    assert '<div class="sub">Собрано ' in out
+
+
 def test_ui_strings_skips_chrome_this_sheet_does_not_have():
     """One translation table should serve every sheet a repo emits, including sheets
     with no save banner."""
