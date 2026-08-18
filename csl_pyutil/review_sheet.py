@@ -33,7 +33,7 @@ import warnings
 
 from csl_pyutil.evidence import PreflightError, PreflightWarning, preflight
 
-__version__ = "0.17.1"
+__version__ = "0.18.0"
 
 __all__ = ["render_review_sheet", "render_review_sheet_packset", "esc", "mark_cyrillic",
            "RU_UI_STRINGS"]
@@ -1599,6 +1599,16 @@ UI_STRINGS = {
         r"(?P<pre>var INBOX_CODE = ')(?P<body>[^']*)(?P<post>';)"),
     "inbox_failed": re.compile(
         r"(?P<pre>var INBOX_FAILED = ')(?P<body>[^']*)(?P<post>';)"),
+    # H2847: three bare English chrome words baked straight into
+    # _CORE_TEMPLATE's <head>/<header> — never reachable via title/subtitle/
+    # footer/approve_label/reject_label, so a fully-translated sheet still
+    # showed "N items", "Generated ..." and lang="en" in the browser tab.
+    "count_suffix": re.compile(
+        r"(?P<pre>\d )(?P<body>items)(?P<post></(?:title|h1)>)"),
+    "generated_label": re.compile(
+        r'(?P<pre><div class="sub">)(?P<body>Generated)(?P<post> )'),
+    "doc_lang": re.compile(
+        r'(?P<pre><html lang=")(?P<body>en)(?P<post>">)'),
 }
 
 
@@ -1674,6 +1684,9 @@ RU_UI_STRINGS = {
     "inbox_disabled": "нет OAuth client_id / релея device-flow — используйте «Скачать decisions.json»",
     "inbox_code": "откройте {url} и введите код {code}",
     "inbox_failed": "сохранить в GitHub не удалось: {why}",
+    "count_suffix": "карточек",
+    "generated_label": "Собрано",
+    "doc_lang": "ru",
 }
 
 
