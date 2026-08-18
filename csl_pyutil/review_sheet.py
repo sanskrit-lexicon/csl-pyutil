@@ -33,7 +33,7 @@ import warnings
 
 from csl_pyutil.evidence import PreflightError, PreflightWarning, preflight
 
-__version__ = "0.15.0"
+__version__ = "0.16.0"
 
 __all__ = ["render_review_sheet", "esc", "mark_cyrillic", "RU_UI_STRINGS"]
 
@@ -237,21 +237,32 @@ _CORE_TEMPLATE = '''<!DOCTYPE html>
 '''
 
 
+def _fmt_typology_chip(entry):
+    """U7 (H2846) — a typology/classification label chip: the label plus its
+    count on this card and its share of the sheet's population, never bare."""
+    share_txt = "share unknown" if entry.get("share_unknown") else "%.0f%%" % (100 * entry["share"])
+    return '<span class="badge badge-typology" title="U7: count + population share">%s (n=%s, %s)</span>' % (
+        esc(entry["label"]), esc(entry["n"]), esc(share_txt))
+
+
 def render_card(item, approve_label, reject_label, *, show_id=False, rating=None,
                 reject_labels=None):
     """Ported verbatim from build_h180_review_sheets.py — item shape:
     {"id", "filt", "title", "badges": [...], "question" (HTML), "panels":
     [(heading, html_body), ...], "note_placeholder" (optional), "title_href"
     (optional — V4 of the 19-07-2026 standard: the card header becomes a
-    clickable link to the full source entry)}.
+    clickable link to the full source entry), "typology" (optional — U7 of
+    the H2846 content standard: ``[{"label", "n", "share"}, ...]``, rendered
+    as chips distinct from plain ``badges`` — see ``_check_typology_stats``)}.
 
     With ``show_id=False``, ``rating=None``, ``reject_labels=None`` and no
-    ``title_href`` the output is byte-identical to the v0.2.0 renderer
-    (fixture contract)."""
+    ``title_href``/``typology`` the output is byte-identical to the v0.2.0
+    renderer (fixture contract)."""
     panels = "".join(
         '<div class="panel"><h4>%s</h4>%s</div>' % (esc(h4), body)
         for h4, body in item["panels"])
     badges = "".join('<span class="badge">%s</span>' % esc(b) for b in item.get("badges", []))
+    badges += "".join(_fmt_typology_chip(t) for t in item.get("typology", []))
     title_html = esc(item["title"])
     if item.get("title_href"):
         title_html = '<a class="hwlink" href="%s" target="_blank" rel="noopener">%s</a>' % (
@@ -468,6 +479,7 @@ _STANDARD_CSS = '''  .idchip { font-family:ui-monospace,Consolas,monospace; font
   button.rate.active { background:var(--accent); border-color:var(--accent); color:#fff; }
   button.rate.active.below { background:var(--defer); border-color:var(--defer); color:#2a1d02; }
   .rate-state { font-size:12px; color:var(--muted); margin-left:4px; }
+  .badge-typology { border:1px solid var(--accent); color:var(--text); font-weight:600; }
 '''
 
 #: Type scale (H1808). MG, voting the G5 batch1v3 sheet 28-07-2026: "increase
@@ -1927,6 +1939,41 @@ def _check_non_decisions(items, threshold):
         ])
 
 
+def _check_typology_stats(items):
+    """U7 (H2846) — a typology / classification label rendered on a card must
+    carry, beside the label, its count on this card AND its share of the
+    whole population the sheet draws from. The v2 re-glue card asked a
+    reviewer to approve a typology whose distribution was invisible on the
+    card (1,534 restatements / 250 additions / 1 correction measured but not
+    shown — a reviewer reading only chips over-weights the rare class). A
+    generator opts in per item via ``item["typology"] = [{"label", "n",
+    "share"}, ...]``; ``share`` may be omitted only when the entry sets
+    ``"share_unknown": True`` — silence is never permitted. Items with no
+    ``typology`` key are unaffected (additive, like V10/V13)."""
+    findings = []
+    for it in items:
+        entries = it.get("typology")
+        if not entries:
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                findings.append("%s: typology entries must be mappings" % it.get("id"))
+                continue
+            label = entry.get("label")
+            if not label:
+                findings.append("%s: typology entry missing 'label'" % it.get("id"))
+                label = "<unlabeled>"
+            if entry.get("n") is None:
+                findings.append("%s: typology label %r missing count n=" % (it.get("id"), label))
+            if entry.get("share") is None and not entry.get("share_unknown"):
+                findings.append(
+                    "%s: typology label %r missing share= (pass share_unknown=True if the "
+                    "population share is genuinely unknown — silence is not permitted)"
+                    % (it.get("id"), label))
+    if findings:
+        raise PreflightError(findings)
+
+
 def _evidence_gate(doc, manifest, config, extras):
     """V9 — run the H1887 preflight against the FINISHED document and raise before
     a single byte reaches the caller. Absent manifest: warn loudly with the reason."""
@@ -1997,6 +2044,17 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
         ``PreflightWarning`` (same migration-ramp shape as V9's manifest
         warning, becomes an error in 1.0.0). Named V13, not V12 — H2858 (same
         day) already shipped V12 for the partial hand-in + pause layer.
+    item["typology"]: **U7 (H2846)** — ``[{"label", "n", "share"}, ...]``, one
+        entry per classification label this card is being asked to confirm.
+        Rendered as chips distinct from plain ``badges``, each showing the
+        label plus its count on this card and its share of the sheet's whole
+        population (``"share": 0.86`` renders ``86%``). Omitting ``n`` or
+        ``share`` raises ``PreflightError`` — pass ``"share_unknown": True``
+        on an entry only when the population share is genuinely unknown; a
+        bare label is a build error, not a style lapse (see
+        ``_check_typology_stats``). Cards with no ``typology`` key are
+        unaffected.
+
     config["strict_review"]: optional mapping enabling an additive strict
         decisions export. ``reviewer`` supplies the initial reviewer ID;
         ``require_all_votes`` and ``require_reject_note`` default to True.
@@ -2178,6 +2236,8 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
     # V13 (H2854): every internal id named in a card's question must also name
     # its human identity — same call site as V10, before any HTML is built.
     _check_identity(items, config.get("identity_gate"), config.get("sheet_id"), extras)
+    # U7 (H2846): a typology label with no count/share is a build error.
+    _check_typology_stats(items)
 
     show_ids = bool(config.get("show_ids", False))
     rating = config.get("rating")
