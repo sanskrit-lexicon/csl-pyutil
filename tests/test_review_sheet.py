@@ -380,14 +380,17 @@ def test_ui_strings_translates_chrome():
 
 
 def test_ui_strings_translates_head_chrome():
-    """H2847 — "N items", "Generated ..." and lang="en" are baked into
-    _CORE_TEMPLATE's <head>/<header>, unreachable via title/subtitle/footer;
-    a fully-translated sheet still leaked them into the browser tab."""
+    """H2847 — "N items", "Generated ...", lang="en", and the "all"/"unvoted
+    only" filter buttons are baked into _CORE_TEMPLATE's <head>/<header>,
+    unreachable via title/subtitle/footer; a fully-translated sheet still
+    leaked them into the browser tab and the filter bar."""
     out = render_review_sheet(_items(), _config(
         ui_strings={
             "count_suffix": "карточек",
             "generated_label": "Собрано",
             "doc_lang": "ru",
+            "filter_all": "все",
+            "filter_unvoted": "только непроголосованные",
         }))
     assert "карточек</title>" in out
     assert "карточек</h1>" in out
@@ -396,6 +399,10 @@ def test_ui_strings_translates_head_chrome():
     assert ">Generated " not in out
     assert '<html lang="ru">' in out
     assert '<html lang="en">' not in out
+    assert '>все</button>' in out
+    assert '>только непроголосованные</button>' in out
+    assert ">all<" not in out
+    assert "unvoted only" not in out
 
 
 def test_ru_ui_strings_preset_covers_head_chrome():
@@ -406,6 +413,8 @@ def test_ru_ui_strings_preset_covers_head_chrome():
     assert '<html lang="ru">' in out
     assert "карточек</h1>" in out
     assert '<div class="sub">Собрано ' in out
+    assert '>все</button>' in out
+    assert '>только непроголосованные</button>' in out
 
 
 def test_ui_strings_skips_chrome_this_sheet_does_not_have():
