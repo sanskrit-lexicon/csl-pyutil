@@ -5,6 +5,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-08-18
+
+### Fixed
+
+- **The inbox `PUT` named a branch that does not exist ([H2991](https://github.com/gasyoun/Uprava/blob/main/handoffs/archive/H2991-Opus_csl-pyutil_vote-w3-packs-oauth_17.08.26.md)).** `github_inbox["branch"]` defaulted to `"main"`, and [`gasyoun/vote-inbox`](https://github.com/gasyoun/vote-inbox) is on **`master`** — so the first real Save to GitHub would have `404`ed against a branch that is not there. Nothing caught it in 0.17.0 because the whole write path is unreachable until an OAuth client_id exists, so the unit tests exercised the payload and never the branch. The default is now **empty, meaning "the repo's own default branch"**, which the contents API resolves itself; `?ref=` is likewise omitted from the pre-read unless a branch is named explicitly. Passing `branch` still works and still wins. Three regression tests.
+
+### Changed
+
+- **The device-flow relay exists, so the button is reachable.** The 0.17.0 note said token acquisition needed a CORS-capable relay; one now runs at `https://kosha.193.232.229.92.sslip.io/gh-device` (nginx `proxy_pass` + CORS headers, no new service and no `client_secret`). Set `github_inbox["device_url"]` to it. Verified in a real browser: a direct `fetch` to `github.com/login/device/code` fails with `TypeError: Failed to fetch` while the same page reads GitHub's genuine response through the relay. Registering an OAuth App is still a human step — GitHub exposes no API for it — and without a `client_id` the button stays disabled by design.
+
 ## [0.17.0] - 2026-08-18
 
 ### Added
