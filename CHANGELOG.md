@@ -5,6 +5,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.1] - 2026-08-18
+
+### Fixed
+
+- **A stale agent worktree inside a repo made its sheets unbuildable ([H2991](https://github.com/gasyoun/Uprava/blob/main/handoffs/archive/H2991-Opus_csl-pyutil_vote-w3-packs-oauth_17.08.26.md)).** `EvidenceManifest.scan_prior_art()` walked the whole repo pruning only `.git` / `node_modules` / `__pycache__` / `review` — nothing that covers an agent's own scratch checkout. Two leftover worktrees under `SanskritLexicography/.claude/worktrees/` therefore turned the 500-card BLI gold sheet into a hard `PreflightError` with **13 blocking findings, every one a COPY of a file the manifest had already declared**. The sheet could not be regenerated at all, and the error blamed the sheet rather than the environment.
+  - **A scratch checkout is not prior art — it is the same art seen twice.** The pruning list is now the named `_SCAN_SKIP_DIRS`, covering VCS internals, dependency trees (`node_modules`, `.venv`, `site-packages`, `.tox`), build outputs (`dist`, `build`, `.eggs`), caches, and agent/tool scratch areas (`.claude`, `.codex`, `.grok`, `.worktrees`, `.idea`, `.vscode`) alongside the existing `review`.
+  - A repo that genuinely keeps evidence in one of those is misfiled, not mis-scanned — so this cannot hide a real artifact.
+  - Regression test builds a real artifact plus four copies under scratch/dependency trees and asserts the real one is still found while none of the copies are.
+
 ## [0.19.0] - 2026-08-18
 
 ### Added
