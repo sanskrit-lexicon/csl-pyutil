@@ -33,9 +33,10 @@ import warnings
 
 from csl_pyutil.evidence import PreflightError, PreflightWarning, preflight
 
-__version__ = "0.16.0"
+__version__ = "0.17.0"
 
-__all__ = ["render_review_sheet", "esc", "mark_cyrillic", "RU_UI_STRINGS"]
+__all__ = ["render_review_sheet", "render_review_sheet_packset", "esc", "mark_cyrillic",
+           "RU_UI_STRINGS"]
 
 
 def esc(s):
@@ -1580,6 +1581,24 @@ UI_STRINGS = {
         r"(?P<pre>var FLOW_CLOCK_PAUSED = ')(?P<body>[^']*)(?P<post>';)"),
     "flow_clock_idle": re.compile(
         r"(?P<pre>var FLOW_CLOCK_IDLE = ')(?P<body>[^']*)(?P<post>';)"),
+    # V16 inbox (H2991) — present only when config["github_inbox"] is passed and
+    # config["personal_data"] is not True. As with handin_said, the status
+    # sentences are assembled in JS, so each is one single-quoted literal whose
+    # {n}/{pack}/{url}/{code}/{why} placeholders a translation keeps verbatim.
+    "inbox_button": "Save to GitHub",
+    "inbox_title": re.compile(
+        r'(?P<pre>id="inboxBtn" title=")(?P<body>push this pack\'s ids and verdicts to '
+        r'the public vote inbox)(?P<post>">)'),
+    "inbox_hydrated": re.compile(
+        r"(?P<pre>var INBOX_HYDRATED = ')(?P<body>[^']*)(?P<post>';)"),
+    "inbox_saved": re.compile(
+        r"(?P<pre>var INBOX_SAVED = ')(?P<body>[^']*)(?P<post>';)"),
+    "inbox_disabled": re.compile(
+        r"(?P<pre>var INBOX_DISABLED = ')(?P<body>[^']*)(?P<post>';)"),
+    "inbox_code": re.compile(
+        r"(?P<pre>var INBOX_CODE = ')(?P<body>[^']*)(?P<post>';)"),
+    "inbox_failed": re.compile(
+        r"(?P<pre>var INBOX_FAILED = ')(?P<body>[^']*)(?P<post>';)"),
 }
 
 
@@ -1647,6 +1666,14 @@ RU_UI_STRINGS = {
     "flow_clock_running": "идут",
     "flow_clock_paused": "пауза",
     "flow_clock_idle": "простой",
+    # V16 inbox (H2991). No apostrophes: these land inside single-quoted JS literals.
+    "inbox_button": "Сохранить в GitHub",
+    "inbox_title": "отправить id и вердикты этого пакета в публичный ящик голосов",
+    "inbox_hydrated": "подтянуто {n} голос(ов) с GitHub",
+    "inbox_saved": "пакет {pack} сохранён в GitHub",
+    "inbox_disabled": "нет OAuth client_id / релея device-flow — используйте «Скачать decisions.json»",
+    "inbox_code": "откройте {url} и введите код {code}",
+    "inbox_failed": "сохранить в GitHub не удалось: {why}",
 }
 
 
@@ -1996,6 +2023,346 @@ def _evidence_gate(doc, manifest, config, extras):
     return doc
 
 
+# ----------------------------------------------------------------------------- V16 packs + GitHub inbox (H2991)
+# W3 track B. Two problems, one layer:
+#
+#   * A 320-card sheet is one HTML file and one sitting. Splitting it into packs
+#     of 10 gives the curator a unit they can finish, while the votes stay in ONE
+#     localStorage record — parent and packs share `sheet_id`, so STORE_KEY is
+#     the same string on gasyoun.github.io and pack 2 already knows what pack 1
+#     decided.
+#   * A vote that lives only in one browser is lost when that browser is. The
+#     inbox layer pushes ids+verdicts to a public repo and pulls them back on
+#     load, so a second machine resumes the same sitting.
+#
+# MEASURED 18-08-2026 — GitHub's OAuth device endpoints are not CORS-enabled.
+# `OPTIONS https://github.com/login/device/code` with `Origin: https://gasyoun.
+# github.io` returns 404 and NO `Access-Control-Allow-Origin`; the POST likewise
+# comes back without one. A static page can therefore SEND the device-code
+# request and never READ the reply — this is GitHub hardening the OAuth
+# endpoints against browser-based token theft, not an outage to wait out. The
+# `api.github.com` half is fine: the hydrate GET answers
+# `Access-Control-Allow-Origin: *`, and the contents PUT preflight answers 204
+# allowing `Authorization`. So B3 and the write itself work from the page; only
+# TOKEN ACQUISITION needs a CORS-capable relay that forwards to github.com and
+# echoes the headers back. `github_inbox["device_url"]` is where that relay goes.
+# Empty (the default) leaves the button disabled with an honest tooltip rather
+# than shipping a control that cannot succeed. No `client_secret` is involved at
+# any point — device flow does not use one, which is why a relay stays safe to
+# run without secrets.
+_PACK_SIZE_DEFAULT = 10
+_INBOX_REPO_DEFAULT = "gasyoun/vote-inbox"
+
+_INBOX_CSS = '''  .dl.inbox { background:#2d6a4f; }
+  .dl.inbox[disabled] { background:var(--panel2); color:var(--muted); cursor:not-allowed; border:1px solid var(--border); }
+  .inboxnote { color:var(--muted); font-size:12px; }
+  .inboxcode { font-family:ui-monospace,Consolas,monospace; font-size:16px; letter-spacing:.12em;
+               background:#11141a; border:1px solid var(--border); border-radius:6px; padding:4px 10px; }
+'''
+
+_INBOX_BUTTON = ('<button type="button" class="dl inbox" id="inboxBtn" '
+                 'title="push this pack\'s ids and verdicts to the public vote inbox">'
+                 'Save to GitHub</button>'
+                 '<span class="inboxnote" id="inboxNote" role="status"></span>')
+
+
+def _inbox_js(inbox, pack_no, card_questions):
+    """B2 + B3 — the inbox write and the hydrate read.
+
+    Deliberately calls ``exportPayload()`` rather than re-deriving the item
+    shape: repeating the ``note: rec.note || ''`` literal is the trap H2858 and
+    H2887 already paid for, and every payload layer (V11 timing, V12 hand-in,
+    V14 context) has already folded its fields into that one function by the
+    time this layer runs. The inbox projection then throws most of it away —
+    ids and verdicts are what a public repo is allowed to hold.
+    """
+    return '''
+  var INBOX = %(inbox_json)s;
+  var CARD_Q = %(questions_json)s;
+  var INBOX_HYDRATED = 'pulled {n} vote(s) from GitHub';
+  var INBOX_SAVED = 'saved pack {pack} to GitHub';
+  var INBOX_DISABLED = 'no OAuth client_id / device relay configured — use Download decisions.json';
+  var INBOX_CODE = 'open {url} and enter code {code}';
+  var INBOX_FAILED = 'GitHub save failed: {why}';
+  var __inboxBtn = document.getElementById('inboxBtn');
+  var __inboxNote = document.getElementById('inboxNote');
+  function __inboxSay(msg) { if (__inboxNote) __inboxNote.textContent = msg; }
+  function __inboxDir() {
+    return 'https://api.github.com/repos/' + INBOX.repo + '/contents/decisions/'
+      + encodeURIComponent(SHEET_ID);
+  }
+  // A public repo must not become a back door onto the card text. A note ships
+  // only when it is short, carries no markup, and is not the card's own question
+  // pasted back — otherwise the decision travels alone.
+  function __inboxNoteOk(id, note) {
+    if (!note) return false;
+    if (note.length > 280) return false;
+    if (note.indexOf('<') >= 0) return false;
+    var q = CARD_Q[id];
+    if (q && q.length > 12 && note.indexOf(q) >= 0) return false;
+    return true;
+  }
+  function __inboxPayload() {
+    var base = JSON.parse(exportPayload());
+    return { sheet_id: base.sheet_id, pack: INBOX.pack, generated: base.generated,
+             decided: base.decided,
+             items: base.items.map(function (it) {
+               var out = { id: it.id, decision: it.decision };
+               if (__inboxNoteOk(it.id, it.note)) out.note = it.note;
+               return out;
+             }) };
+  }
+  function __inboxHydrate() {
+    fetch(__inboxDir()).then(function (r) { return r.ok ? r.json() : []; }).then(function (list) {
+      if (!Array.isArray(list) || !list.length) return;
+      var files = list.filter(function (f) { return /\\.json$/.test(f.name || ''); });
+      var pending = files.length, merged = 0;
+      if (!pending) return;
+      files.forEach(function (f) {
+        fetch(f.download_url).then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (doc) {
+            if (!doc || !doc.items) return;
+            doc.items.forEach(function (it) {
+              if (!it.decision || ids.indexOf(it.id) < 0) return;
+              // Two machines, one sheet: the inbox is the shared record, so it wins.
+              state[it.id] = state[it.id] || {};
+              if (state[it.id].decision !== it.decision) merged++;
+              state[it.id].decision = it.decision;
+            });
+          })
+          .catch(function () {})
+          .then(function () {
+            if (--pending > 0) return;
+            if (!merged) return;
+            save();
+            document.querySelectorAll('.card').forEach(function (c) { applyCardUI(c); });
+            __inboxSay(INBOX_HYDRATED.replace('{n}', merged));
+          });
+      });
+    }).catch(function () {});
+  }
+  function __inboxPut(token) {
+    var path = 'decisions/' + encodeURIComponent(SHEET_ID) + '/pack-' + INBOX.pack_name + '.json';
+    var url = 'https://api.github.com/repos/' + INBOX.repo + '/contents/' + path;
+    var body = JSON.stringify(__inboxPayload(), null, 2);
+    var enc = btoa(unescape(encodeURIComponent(body)));
+    function send(sha) {
+      var msg = { message: 'vote: ' + SHEET_ID + ' pack-' + INBOX.pack_name,
+                  content: enc, branch: INBOX.branch };
+      if (sha) msg.sha = sha;
+      return fetch(url, { method:'PUT',
+        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json',
+                   'Accept': 'application/vnd.github+json' },
+        body: JSON.stringify(msg) });
+    }
+    return fetch(url + '?ref=' + encodeURIComponent(INBOX.branch),
+                 { headers: { 'Authorization': 'Bearer ' + token } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (cur) { return send(cur && cur.sha); })
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        __inboxSay(INBOX_SAVED.replace('{pack}', INBOX.pack_name));
+      });
+  }
+  // GitHub does not send Access-Control-Allow-Origin on login/device/* (measured
+  // 18-08-2026), so this exchange cannot go straight to github.com from a page.
+  // INBOX.device_url must name a relay that forwards and echoes CORS headers.
+  function __inboxDeviceToken() {
+    var base = INBOX.device_url.replace(/\\/$/, '');
+    return fetch(base + '/code', { method:'POST',
+        headers: { 'Content-Type':'application/json', 'Accept':'application/json' },
+        body: JSON.stringify({ client_id: INBOX.client_id, scope: 'public_repo' }) })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (d) {
+        __inboxSay(INBOX_CODE.replace('{url}', d.verification_uri).replace('{code}', d.user_code));
+        var iv = Math.max(5, d.interval || 5) * 1000, deadline = Date.now() + (d.expires_in || 900) * 1000;
+        return new Promise(function (resolve, reject) {
+          (function poll() {
+            if (Date.now() > deadline) { reject(new Error('expired')); return; }
+            setTimeout(function () {
+              fetch(base + '/token', { method:'POST',
+                  headers: { 'Content-Type':'application/json', 'Accept':'application/json' },
+                  body: JSON.stringify({ client_id: INBOX.client_id, device_code: d.device_code,
+                    grant_type: 'urn:ietf:params:oauth:grant-type:device_code' }) })
+                .then(function (r) { return r.json(); })
+                .then(function (t) {
+                  if (t.access_token) { resolve(t.access_token); return; }
+                  if (t.error === 'authorization_pending' || t.error === 'slow_down') { poll(); return; }
+                  reject(new Error(t.error || 'device flow refused'));
+                })
+                .catch(reject);
+            }, iv);
+          })();
+        });
+      });
+  }
+  if (__inboxBtn) {
+    if (!INBOX.enabled) {
+      __inboxBtn.disabled = true;
+      __inboxSay(INBOX_DISABLED);
+    } else {
+      __inboxBtn.addEventListener('click', function () {
+        __inboxBtn.disabled = true;
+        __inboxDeviceToken()
+          .then(__inboxPut)
+          .catch(function (e) { __inboxSay(INBOX_FAILED.replace('{why}', e && e.message ? e.message : e)); })
+          .then(function () { __inboxBtn.disabled = false; });
+      });
+    }
+  }
+  __inboxHydrate();
+''' % {"inbox_json": json.dumps(inbox, ensure_ascii=False),
+       "questions_json": json.dumps(card_questions, ensure_ascii=False)}
+
+
+def _normalize_inbox(raw, pack_no, pack_total):
+    """Validate ``config["github_inbox"]`` and resolve the enabled state."""
+    if not isinstance(raw, dict):
+        raise TypeError("github_inbox must be a mapping")
+    repo = str(raw.get("repo", _INBOX_REPO_DEFAULT))
+    if repo.count("/") != 1 or not all(repo.split("/")):
+        raise ValueError("github_inbox['repo'] must be 'owner/name'; got %r" % repo)
+    for secret_key in ("client_secret", "token", "secret"):
+        if raw.get(secret_key):
+            raise ValueError(
+                "github_inbox[%r] is refused: the device flow needs no secret, and a "
+                "review sheet is a public artifact. Pass only a public client_id."
+                % secret_key
+            )
+    client_id = str(raw.get("client_id", "") or "")
+    device_url = str(raw.get("device_url", "") or "")
+    return {
+        "repo": repo,
+        "branch": str(raw.get("branch", "main")),
+        "client_id": client_id,
+        "device_url": device_url,
+        "pack": pack_no,
+        "pack_name": "%02d" % pack_no,
+        "packs": pack_total,
+        "enabled": bool(client_id and device_url),
+    }
+
+
+def _add_github_inbox(doc, inbox, items):
+    """Install the V16 inbox layer on a finished pack/sheet document."""
+    anchor = '<button class="dl" id="downloadBtn">Download decisions.json</button>'
+    if anchor not in doc:
+        raise ValueError("review-sheet download button anchor is missing")
+    doc = doc.replace(anchor, anchor + _INBOX_BUTTON, 1)
+    if "</style>" in doc:
+        doc = doc.replace("</style>", _INBOX_CSS + "</style>", 1)
+    questions = {}
+    for it in items:
+        q = _TAG_STRIP.sub(" ", it.get("question", "") or "")
+        q = " ".join(q.split())
+        if q:
+            questions[it["id"]] = q
+    doc = doc.replace("})();\n</script>", _inbox_js(inbox, inbox["pack"], questions) + "})();\n</script>", 1)
+    return doc
+
+
+_PARENT_TEMPLATE = '''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="dark">
+<meta name="generator" content="csl-pyutil/%(version)s">
+<title>%(title)s — %(packs)d packs</title>
+<style>
+  :root { color-scheme: dark; --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --text:#e6e6e6; --muted:#9aa0aa;
+          --accent:#5b8cff; --ok:#3fb950; --border:#2a2f3a; }
+  * { box-sizing: border-box; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,Segoe UI,Roboto,sans-serif;
+         margin:0; padding:0 0 80px 0; font-size:15px; }
+  header.top { background:var(--panel); border-bottom:1px solid var(--border); padding:14px 20px; }
+  header.top h1 { font-size:17px; margin:0 0 4px; }
+  header.top .sub { color:var(--muted); font-size:12px; }
+  main { max-width:760px; margin:0 auto; padding:18px 20px; }
+  .overall { background:var(--panel); border:1px solid var(--border); border-radius:10px;
+             padding:14px 16px; margin-bottom:18px; }
+  .bar { height:8px; background:var(--panel2); border-radius:5px; overflow:hidden; margin-top:8px; }
+  .bar > i { display:block; height:100%%; background:var(--ok); width:0; transition:width .2s; }
+  ol.packs { list-style:none; margin:0; padding:0; }
+  ol.packs li { margin-bottom:10px; }
+  a.pack { display:flex; align-items:center; justify-content:space-between; gap:12px;
+           background:var(--panel); border:1px solid var(--border); border-radius:10px;
+           padding:13px 16px; color:var(--text); text-decoration:none; }
+  a.pack:hover { border-color:var(--accent); }
+  a.pack .n { font-weight:700; }
+  a.pack .prog { color:var(--muted); font-size:13px; }
+  a.pack.done { border-left:4px solid var(--ok); }
+  a.pack.done .prog { color:var(--ok); }
+  footer.hint { max-width:760px; margin:20px auto; padding:0 20px; color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<header class="top">
+  <div>
+    <h1>%(title)s</h1>
+    <div class="sub">Generated %(generated)s &middot; sheet_id <code>%(sheet_id)s</code>
+      &middot; %(n)d items in %(packs)d packs &middot; %(subtitle)s</div>
+  </div>
+</header>
+<main>
+  <div class="overall">
+    <div><b id="ovText">0 of %(n)d decided</b></div>
+    <div class="bar"><i id="ovBar"></i></div>
+  </div>
+  <ol class="packs" id="packs">%(rows)s
+  </ol>
+</main>
+<footer class="hint">%(footer)s Each pack is its own page; all packs share this
+  sheet_id, so one browser keeps one record of the whole sheet and a pack you
+  finished stays finished when you come back.</footer>
+<script>
+(function () {
+  var SHEET_ID = %(sheet_id_json)s;
+  var STORE_KEY = 'review-sheet:' + SHEET_ID;
+  var PACKS = %(packs_json)s;
+  var state = {};
+  try { state = JSON.parse(localStorage.getItem(STORE_KEY) || '{}') || {}; } catch (e) { state = {}; }
+  var total = 0, done = 0;
+  PACKS.forEach(function (p) {
+    var d = p.ids.filter(function (id) { return state[id] && state[id].decision; }).length;
+    total += p.ids.length; done += d;
+    var el = document.getElementById('pack-' + p.name);
+    if (!el) return;
+    el.querySelector('.prog').textContent = d + ' / ' + p.ids.length;
+    if (d === p.ids.length) el.classList.add('done');
+  });
+  document.getElementById('ovText').textContent = done + ' of ' + total + ' decided';
+  document.getElementById('ovBar').style.width = (total ? (100 * done / total) : 0) + '%%';
+})();
+</script>
+</body>
+</html>
+'''
+
+
+def _render_pack_parent(config, pack_slices, hub_name):
+    """The index page over a packset: one row per pack, progress off the shared record."""
+    packs_meta = [{"name": "%02d" % n, "ids": [it["id"] for it in sl]}
+                  for n, sl in enumerate(pack_slices, 1)]
+    rows = "".join(
+        '\n    <li><a class="pack" id="pack-%(name)s" href="%(href)s">'
+        '<span class="n">Pack %(num)d of %(total)d</span>'
+        '<span class="prog">0 / %(n)d</span></a></li>'
+        % {"name": p["name"], "num": i, "total": len(packs_meta), "n": len(p["ids"]),
+           "href": esc("%s/pack-%s.html" % (hub_name, p["name"]))}
+        for i, p in enumerate(packs_meta, 1)
+    )
+    return _PARENT_TEMPLATE % {
+        "version": __version__,
+        "title": esc(config["title"]), "subtitle": esc(config["subtitle"]),
+        "footer": config["footer"], "generated": esc(config["generated"]),
+        "sheet_id": esc(config["sheet_id"]),
+        "n": sum(len(p["ids"]) for p in packs_meta), "packs": len(packs_meta),
+        "rows": rows,
+        "sheet_id_json": json.dumps(config["sheet_id"]),
+        "packs_json": json.dumps(packs_meta),
+    }
+
+
 def render_review_sheet(items, config, *, extras=True, screening=None, manifest=None):
     """Build a self-contained HTML review/voting sheet.
 
@@ -2288,6 +2655,18 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
     session_flow = config.get("session_flow", True)
     if not isinstance(session_flow, bool):
         raise TypeError("session_flow must be a bool")
+    # V16 (H2991). personal_data wins over every inbox setting: a sheet carrying
+    # personal data may not gain a control that writes to a public repo, and must
+    # not read one either, so the layer is simply absent from the document.
+    personal_data = config.get("personal_data", False)
+    if not isinstance(personal_data, bool):
+        raise TypeError("personal_data must be a bool")
+    inbox_raw = config.get("github_inbox")
+    inbox = None
+    if inbox_raw is not None and not personal_data:
+        pack_info = config.get("pack") or {}
+        inbox = _normalize_inbox(inbox_raw, int(pack_info.get("index", 1)),
+                                 int(pack_info.get("total", 1)))
     facets = _normalize_facets(config.get("facets"))
     facet_count_label = str(config.get("facet_count_label", "showing {shown} of {total}"))
     facet_reset_label = str(config.get("facet_reset_label", "clear facets"))
@@ -2385,7 +2764,69 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
         # After every payload-producing layer (V8 autosave, strict, V12 hand-in):
         # one replace_all then covers all export sites.
         doc = _add_export_context(doc, context)
+    if inbox is not None:
+        # V16 last among the payload layers: it projects exportPayload()'s finished
+        # output down to ids+verdicts, so every field the earlier layers fold in is
+        # already there to be dropped. Before _localize, so its strings translate.
+        doc = _add_github_inbox(doc, inbox, items)
     doc = _localize(doc, config.get("ui_strings"))
     # Last, on the finished document: the script-purity and citation checks must see
     # exactly what the reviewer will see, translations and all.
     return _evidence_gate(doc, manifest, config, extras=True)
+
+
+def render_review_sheet_packset(items, config, *, extras=True, screening=None,
+                                manifest=None, hub_name=None):
+    """V16 (H2991) — split a long sheet into packs of ``config["pack_size"]`` (10).
+
+    A 320-card sheet is one file and one sitting nobody finishes. This returns
+    ``{"parent": html_or_None, "packs": [html, ...]}``: one page per pack of at
+    most ``pack_size`` cards (the last may be shorter — 22 becomes 10+10+2), plus
+    an index page listing them with live progress.
+
+    **The packs share one record.** Every pack renders with the SAME
+    ``config["sheet_id"]``, so ``STORE_KEY`` is one string per origin and pack 2
+    already knows what pack 1 decided; the parent reads that same record to show
+    per-pack progress. Each pack's exported JSON still carries only ITS OWN slice
+    of ids, so a decisions file names exactly the cards that page could vote on.
+
+    ``len(items) <= pack_size`` is not a packset: you get
+    ``{"parent": None, "packs": [one_sheet]}``, byte-identical to calling
+    :func:`render_review_sheet` directly. Splitting a sheet that fits would cost a
+    click and buy nothing.
+
+    ``hub_name`` is the published directory stem — the parent links to
+    ``<hub_name>/pack-01.html``. Defaults to ``config["sheet_id"]``, which is the
+    hub's own convention (``vote/sheets/<name>.html`` beside
+    ``vote/sheets/<name>/pack-01.html``).
+
+    ``config["github_inbox"]`` (V16, optional) adds the **Save to GitHub** control
+    and the hydrate read — see :func:`_normalize_inbox`. Each pack writes
+    ``decisions/<sheet_id>/pack-NN.json`` in the inbox repo, so packs never
+    overwrite one another. ``config["personal_data"] = True`` removes the control
+    and the read entirely, whatever ``github_inbox`` says.
+
+    ``screening`` / ``manifest`` are forwarded to every pack unchanged: both
+    describe the WHOLE sheet's provenance, and the manifest's own checks are
+    manifest-level (evidence floor, prior art) or text-level against the document
+    in hand, so a slice neither weakens nor falsely trips them.
+    """
+    pack_size = config.get("pack_size", _PACK_SIZE_DEFAULT)
+    if not isinstance(pack_size, int) or isinstance(pack_size, bool):
+        raise TypeError("pack_size must be an int")
+    if pack_size < 1:
+        raise ValueError("pack_size must be >= 1")
+    items = list(items)
+    if len(items) <= pack_size:
+        return {"parent": None,
+                "packs": [render_review_sheet(items, config, extras=extras,
+                                              screening=screening, manifest=manifest)]}
+    slices = [items[i:i + pack_size] for i in range(0, len(items), pack_size)]
+    packs = []
+    for n, sl in enumerate(slices, 1):
+        cfg = dict(config)
+        cfg["pack"] = {"index": n, "total": len(slices)}
+        packs.append(render_review_sheet(sl, cfg, extras=extras,
+                                         screening=screening, manifest=manifest))
+    parent = _render_pack_parent(config, slices, hub_name or config["sheet_id"])
+    return {"parent": parent, "packs": packs}

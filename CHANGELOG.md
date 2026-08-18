@@ -5,6 +5,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-08-18
+
+### Added
+
+- **V16 — packs of 10 sharing one record, plus the public vote inbox ([H2991](https://github.com/gasyoun/Uprava/blob/main/handoffs/H2991-Opus_csl-pyutil_vote-w3-packs-oauth_17.08.26.md), W3 track B; plan [PLAN_UPRAVA_VOTE_PLATFORM_2026Q3.md](https://github.com/gasyoun/Uprava/blob/main/docs/PLAN_UPRAVA_VOTE_PLATFORM_2026Q3.md)).** A 320-card sheet is one HTML file and one sitting nobody finishes.
+  - New entry point `render_review_sheet_packset(items, config, *, hub_name=None) -> {"parent", "packs"}`. `config["pack_size"]` (default **10**) splits a long sheet into `pack-NN.html` slices — 22 becomes 10+10+2 — under a parent index page carrying per-pack progress. `len(items) <= pack_size` returns `{"parent": None, "packs": [one sheet]}` **byte-identical to a plain `render_review_sheet`** call, so splitting a sheet that fits costs nothing and buys nothing.
+  - **One `sheet_id` across parent and packs**, therefore one `STORE_KEY` per origin: pack 2 already knows what pack 1 decided, and the parent reads that same record. Each pack's own export still names only its slice, so a `decisions.json` describes exactly the cards that page could vote on.
+  - **`config["github_inbox"]`** adds «Сохранить в GitHub» / **Save to GitHub**: each pack writes `decisions/<sheet_id>/pack-NN.json` to a public inbox repo (default `gasyoun/vote-inbox`) and hydrates from it on load, so a second machine resumes the same sitting. Scope is `public_repo` only; the inbox payload is **ids and verdicts**, never card text. A note ships only when it is ≤280 chars, carries no `<`, and is not the card's own question pasted back. Passing `client_secret`/`token`/`secret` in that mapping is a build error — the device flow needs no secret.
+  - **`config["personal_data"] = True` removes the layer entirely** — no button, and no hydrate read either — whatever `github_inbox` says. The pack split still happens.
+  - Six new `UI_STRINGS` keys (`inbox_*`), all translated in `RU_UI_STRINGS`.
+
+### Known limitation
+
+- **The device-flow login needs a CORS relay; GitHub will not serve it directly.** Measured 18-08-2026: `OPTIONS https://github.com/login/device/code` with `Origin: https://gasyoun.github.io` answers **404 with no `Access-Control-Allow-Origin`**, and the POST likewise carries none — a static page may send the device-code request but can never read the reply. This is GitHub hardening its OAuth endpoints against browser-based token theft, not an outage to wait out. The `api.github.com` half is unaffected and works today: the hydrate GET answers `Access-Control-Allow-Origin: *` and the contents `PUT` preflight answers `204` allowing `Authorization`. So B3 and the write itself are live; only **token acquisition** needs a relay that forwards to github.com and echoes CORS headers, named in `github_inbox["device_url"]`. Until BOTH `client_id` and `device_url` are set the button ships **disabled with an honest tooltip** rather than as a control that cannot succeed — and the pack layer ships regardless, per the handoff's "missing OAuth App is not a stop" fence.
+
+### Tests
+
+- `tests/test_v16_packset.py` — 50 cases: the 10/11/22 split contract, the byte-identical single-pack path, shared `sheet_id`, per-pack id scoping, parent progress metadata, the inbox enable rule, secret refusal, the `personal_data` blackout, note hygiene, `exportPayload()` reuse (never re-emitting the `note: rec.note || ''` literal), no `typeof` neighbour probes, RU coverage, and `node --check` over six layer combinations.
+- `tests/fixtures/build_v16_packset_demo.py` builds the 22-card acceptance fixture; `tests/fixtures/smoke_v16_packset_browser.py` drives it in headless Chromium over HTTP (one origin, as on the hub) and asserts the acceptance sentence — voting pack 1 leaves pack 2 unvoted while the parent reads 10/22 and 1 of 3 packs done. **21/21 green 18-08-2026.** Requires `playwright`, which is not a package dependency.
+
 ## [0.16.0] - 2026-08-18
 
 ### Added
