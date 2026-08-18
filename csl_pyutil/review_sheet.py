@@ -33,7 +33,7 @@ import warnings
 
 from csl_pyutil.evidence import PreflightError, PreflightWarning, preflight
 
-__version__ = "0.20.0"
+__version__ = "0.21.0"
 
 __all__ = ["render_review_sheet", "render_review_sheet_packset", "esc", "mark_cyrillic",
            "RU_UI_STRINGS"]
@@ -1589,6 +1589,17 @@ UI_STRINGS = {
     "inbox_title": re.compile(
         r'(?P<pre>id="inboxBtn" title=")(?P<body>push this pack\'s ids and verdicts to '
         r'the public vote inbox)(?P<post>">)'),
+    # V17 voting ergonomics (present unless config["vote_ux"] is False). Assembled
+    # in JS, so each is one single-quoted literal keeping its {n}/{total}/{minutes}
+    # placeholders — a translation needs no JS of its own.
+    "vote_progress": re.compile(
+        r"(?P<pre>var VOTE_PROGRESS = ')(?P<body>[^']*)(?P<post>';)"),
+    "vote_eta": re.compile(
+        r"(?P<pre>var VOTE_ETA = ')(?P<body>[^']*)(?P<post>';)"),
+    "vote_eta_rough": re.compile(
+        r"(?P<pre>var VOTE_ETA_ROUGH = ')(?P<body>[^']*)(?P<post>';)"),
+    "vote_done": re.compile(
+        r"(?P<pre>var VOTE_DONE = ')(?P<body>[^']*)(?P<post>';)"),
     "inbox_pulling": re.compile(
         r"(?P<pre>var INBOX_PULLING = ')(?P<body>[^']*)(?P<post>';)"),
     "inbox_hydrated": re.compile(
@@ -1687,6 +1698,11 @@ RU_UI_STRINGS = {
     # V16 inbox (H2991). No apostrophes: these land inside single-quoted JS literals.
     "inbox_button": "Сохранить в GitHub",
     "inbox_title": "отправить id и вердикты этого пакета в публичный ящик голосов",
+    # V17 (MG 18-08-2026). Placeholders preserved verbatim.
+    "vote_progress": "{n} из {total} по всему листу",
+    "vote_eta": "≈{minutes} мин на все {total}",
+    "vote_eta_rough": "≈{minutes} мин на все {total} (оценка грубая)",
+    "vote_done": "все {total} решены",
     "inbox_pulling": "подтягиваю голоса…",
     "inbox_hydrated": "подтянуто {n} голос(ов) с GitHub",
     "inbox_saved": "пакет {pack} сохранён в GitHub",
@@ -2044,6 +2060,186 @@ def _evidence_gate(doc, manifest, config, extras):
               allow_slp1_tokens=tuple(opts.get("allow_slp1_tokens", ())),
               overlap_threshold=float(opts.get("overlap_threshold", 0.5)),
               skip_prior_art=bool(opts.get("skip_prior_art", False)))
+    return doc
+
+
+
+# ----------------------------------------------------------------------------- V17 voting ergonomics (MG 18-08-2026)
+# Reported after a real sitting on pack 1 of the 320-card gold set. Every item is
+# about where the reviewer's eye already is:
+#
+#   * the submit controls lived in the HEADER, above the cards — the reviewer
+#     finishes at the BOTTOM and had to scroll back up to hand in;
+#   * V15's progress bar was a 120px chip in that same toolbar, easy to miss;
+#   * the ETA described the current PAGE. On a 32-pack sheet the reviewer's real
+#     question is how long the WHOLE instrument will take at the pace they are
+#     going — and because every pack shares one localStorage record AND one
+#     timing record, that is answerable from this page without loading another;
+#   * auto-advance scrolled the next card to the viewport CENTRE, leaving the top
+#     of the card under judgement off the top of the screen.
+#
+# The controls are selected STRUCTURALLY (everything in the toolbar that is not
+# navigation) rather than by a list of ids. An id list would name `inboxBtn`,
+# `flowUndoBtn` and friends in every document, breaking the absence contracts
+# that V12/V15/V16 each rely on — "opt out and not one identifier remains".
+_V17_CSS = '''  .voteprog { flex:1 0 100%; order:99; background:var(--panel);
+              border-top:1px solid var(--border); margin:6px -20px -14px; padding:8px 20px;
+              display:flex; align-items:center; gap:12px; font-size:12px; color:var(--muted); }
+  .voteprog .bar { flex:1 1 auto; height:8px; border-radius:4px; background:var(--panel2);
+                   border:1px solid var(--border); overflow:hidden; }
+  .voteprog .bar i { display:block; height:100%; width:0; background:var(--ok); transition:width .2s; }
+  .voteprog b { color:var(--text); font-weight:700; }
+  .voteprog .eta { white-space:nowrap; }
+  .votebar { position:sticky; bottom:0; z-index:9; background:var(--panel);
+             border-top:1px solid var(--border); padding:10px 20px; margin-top:24px;
+             display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .votebar .spacer { flex:1 1 auto; }
+  .card { scroll-margin-top:96px; }
+  @media (max-width: 640px) { .voteprog { padding:6px 12px; } .votebar { padding:8px 12px; } }
+'''
+
+_V17_PROGRESS_HTML = ('<div class="voteprog" id="voteProg">'
+                      '<span id="voteProgText"></span>'
+                      '<span class="bar"><i id="voteProgBar"></i></span>'
+                      '<span class="eta" id="voteProgEta"></span></div>\n')
+
+_V17_BAR_HTML = '<div class="votebar" id="voteBar"><span class="spacer"></span></div>\n'
+
+
+def _v17_js(packset_total):
+    """Whole-instrument progress + the submit controls moved to the foot.
+
+    The controls are relocated at RUNTIME rather than emitted somewhere else, so
+    every layer's build-time anchors (``downloadBtn``, the toolbar, the payload
+    sites) keep pointing at exactly what they always pointed at. This module's
+    history is largely a list of layers breaking each other by moving markup; a
+    DOM move after load cannot do that.
+    """
+    return '''
+  var VOTE_TOTAL = %(total)s;
+  var VOTE_PROGRESS = '{n} of {total} across the whole sheet';
+  var VOTE_ETA = 'about {minutes} min left for all {total}';
+  var VOTE_ETA_ROUGH = 'about {minutes} min left for all {total} (rough)';
+  var VOTE_DONE = 'all {total} decided';
+  (function () {
+    var bar = document.getElementById('voteBar');
+    if (!bar) return;
+    // The build tagged exactly the submit controls this document actually has.
+    // Navigation (filters, facets, the type-scale control) is untagged and stays
+    // on top, where it is used BEFORE deciding.
+    var moved = document.querySelectorAll('[data-submit]');
+    for (var i = 0; i < moved.length; i++) bar.appendChild(moved[i]);
+  })();
+  // One record backs every pack of a packset — STORE_KEY and TIME_KEY are keyed
+  // on sheet_id, not on the pack — so this page can count and time the WHOLE
+  // instrument without loading a single other pack.
+  function __voteDecidedAll() {
+    var n = 0;
+    for (var k in state) {
+      if (Object.prototype.hasOwnProperty.call(state, k) && state[k] && state[k].decision) n++;
+    }
+    return n;
+  }
+  function __voteSecs() {
+    var per = (typeof __timing !== 'undefined' && __timing && __timing.per) ? __timing.per : null;
+    var out = [];
+    if (!per) return out;
+    for (var k in per) {
+      if (!Object.prototype.hasOwnProperty.call(per, k)) continue;
+      if (!(state[k] && state[k].decision)) continue;
+      if (per[k] > 0) out.push(per[k]);
+    }
+    return out;
+  }
+  function __voteEta(decided, total) {
+    var left = Math.max(0, total - decided);
+    if (!left) return VOTE_DONE.replace('{total}', total);
+    var secs = __voteSecs();
+    if (!secs.length) return '';
+    secs.sort(function (a, b) { return a - b; });
+    var mid = Math.floor(secs.length / 2);
+    var med = (secs.length %% 2) ? secs[mid] : (secs[mid - 1] + secs[mid]) / 2;
+    var minutes = Math.max(1, Math.round(med * left / 60));
+    return (secs.length >= 5 ? VOTE_ETA : VOTE_ETA_ROUGH)
+      .replace('{minutes}', minutes).replace('{total}', total);
+  }
+  function __voteProgress() {
+    var total = VOTE_TOTAL || ids.length;
+    var n = VOTE_TOTAL ? __voteDecidedAll() : ids.filter(function (id) {
+      return state[id] && state[id].decision; }).length;
+    if (n > total) n = total;
+    var t = document.getElementById('voteProgText');
+    if (t) t.innerHTML = VOTE_PROGRESS.replace('{n}', '<b>' + n + '</b>')
+                                      .replace('{total}', '<b>' + total + '</b>');
+    var b = document.getElementById('voteProgBar');
+    if (b) b.style.width = (total ? Math.round(100 * n / total) : 0) + '%%';
+    var e = document.getElementById('voteProgEta');
+    if (e) e.textContent = __voteEta(n, total);
+  }
+  var __voteOrigTally = tally;
+  tally = function () { __voteOrigTally(); __voteProgress(); };
+  __voteProgress();
+''' % {"total": json.dumps(packset_total or 0)}
+
+
+#: The submit controls, as they appear in the finished document. Each is tagged
+#: ONLY when present, so a sheet built without that layer carries no trace of it —
+#: the absence contracts (`session_flow=False` etc.) are byte-level assertions.
+_V17_SUBMIT_ANCHORS = (
+    '<button class="dl" id="downloadBtn">',
+    '<button class="dl" id="saveBtn"',
+    '<button type="button" class="dl handin" id="handinBtn"',
+    '<button class="dl handin" id="handinBtn"',
+    '<button type="button" class="dl flowundo" id="flowUndoBtn"',
+    '<button type="button" class="dl inbox" id="inboxBtn"',
+    '<span class="inboxnote" id="inboxNote"',
+    '<label id="strictReviewerWrap"',
+    '<span id="strictReviewError"',
+)
+#: The pause toggle is deliberately NOT here: it drives the clock chip in the
+#: header tally, and separating a control from the readout it operates is a
+#: worse trade than the tidiness of having every button in one bar.
+
+
+def _tag_submit_controls(doc):
+    """Mark the submit controls this document actually carries."""
+    n = 0
+    for anchor in _V17_SUBMIT_ANCHORS:
+        if anchor not in doc:
+            continue
+        head, rest = anchor.split(" ", 1)
+        doc = doc.replace(anchor, head + ' data-submit="1" ' + rest, 1)
+        n += 1
+    return doc, n
+
+
+def _add_vote_ux(doc, packset_total):
+    """Install V17 on a finished document (after every other DOM layer)."""
+    doc, _tagged = _tag_submit_controls(doc)
+    if "</style>" in doc:
+        doc = doc.replace("</style>", _V17_CSS + "</style>", 1)
+    # Inside the header, not before the toolbar: the header is already
+    # `position:sticky; top:0`, so riding in it puts the bar genuinely at the top
+    # and avoids two sticky-top:0 elements covering each other on scroll.
+    if "</header>" in doc:
+        doc = doc.replace("</header>", _V17_PROGRESS_HTML + "</header>", 1)
+    else:
+        anchor = '<div class="toolbar">'
+        if anchor not in doc:
+            raise ValueError("review-sheet toolbar anchor is missing")
+        doc = doc.replace(anchor, _V17_PROGRESS_HTML + anchor, 1)
+    foot_anchor = '<footer class="hint">'
+    if foot_anchor in doc:
+        doc = doc.replace(foot_anchor, _V17_BAR_HTML + foot_anchor, 1)
+    else:
+        doc = doc.replace("</main>", "</main>\n" + _V17_BAR_HTML, 1)
+    # Auto-advance lands on the TOP of the card rather than its middle. Done HERE,
+    # on the finished document, and never in the core template: `extras=False`
+    # reproduces a pre-H779 shell byte-for-byte, and that fixture is exactly what
+    # caught this being changed at the source.
+    doc = doc.replace("block: 'center'", "block: 'start'")
+    doc = doc.replace("block:'center'", "block:'start'")
+    doc = doc.replace("})();\n</script>", _v17_js(packset_total) + "})();\n</script>", 1)
     return doc
 
 
@@ -2709,6 +2905,17 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
     personal_data = config.get("personal_data", False)
     if not isinstance(personal_data, bool):
         raise TypeError("personal_data must be a bool")
+    # V17 (MG 18-08-2026): progress and submit controls where the reviewer's eye is.
+    vote_ux = config.get("vote_ux", True)
+    if not isinstance(vote_ux, bool):
+        raise TypeError("vote_ux must be a bool")
+    packset_total = config.get("packset_total")
+    if packset_total is not None:
+        if not isinstance(packset_total, int) or isinstance(packset_total, bool):
+            raise TypeError("packset_total must be an int")
+        if packset_total < len(items):
+            raise ValueError("packset_total (%d) is smaller than this page's own "
+                             "item count (%d)" % (packset_total, len(items)))
     inbox_raw = config.get("github_inbox")
     inbox = None
     if inbox_raw is not None and not personal_data:
@@ -2817,6 +3024,10 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
         # output down to ids+verdicts, so every field the earlier layers fold in is
         # already there to be dropped. Before _localize, so its strings translate.
         doc = _add_github_inbox(doc, inbox, items)
+    if vote_ux:
+        # Last of the DOM layers: it relocates controls the earlier layers
+        # installed, so all of them must already be in the document.
+        doc = _add_vote_ux(doc, packset_total)
     doc = _localize(doc, config.get("ui_strings"))
     # Last, on the finished document: the script-purity and citation checks must see
     # exactly what the reviewer will see, translations and all.
@@ -2874,6 +3085,10 @@ def render_review_sheet_packset(items, config, *, extras=True, screening=None,
     for n, sl in enumerate(slices, 1):
         cfg = dict(config)
         cfg["pack"] = {"index": n, "total": len(slices)}
+        # V17: every pack shows progress and an ETA for the WHOLE instrument, not
+        # just its own ten cards -- the reviewer's question on a 32-pack sheet is
+        # how long the whole thing takes at the pace they are going.
+        cfg.setdefault("packset_total", len(items))
         packs.append(render_review_sheet(sl, cfg, extras=extras,
                                          screening=screening, manifest=manifest))
     parent = _render_pack_parent(config, slices, hub_name or config["sheet_id"])

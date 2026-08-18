@@ -5,6 +5,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-08-18
+
+### Added
+
+- **V17 — voting ergonomics, from a real sitting (MG, 18-08-2026, after voting pack 1 of the 320-card gold set).** Four reports, every one about where the reviewer's eye already is.
+  - **The submit controls were in the HEADER, above the work.** A reviewer finishes at the BOTTOM and had to scroll back up to hand in. They now ride in a `.votebar` **stuck to the bottom of the viewport** — "at the foot" without meaning "scroll 3 000 px to submit". Navigation (filters, facets, the type-scale control) deliberately stays on top, where it is used *before* deciding, and the ⏸ pause toggle stays beside the ⏱ chip it operates.
+  - **No real progress bar at the top** — V15's was a 120 px chip in that same toolbar. A full-width bar now rides *inside* the sticky header. Injected before the toolbar it sat ~180 px down at rest, and two `sticky; top:0` elements cover each other on scroll; inside the header there is one pinned thing and no conflict.
+  - **The ETA covered the current PAGE.** On a 32-pack sheet the reviewer's question is how long the WHOLE instrument takes at the pace they are going. Because every pack shares one `localStorage` record **and one timing record** (both keyed on `sheet_id`), any pack can count and time the whole sheet without loading another: `packset_total` is set automatically by `render_review_sheet_packset`, and the bar reads `{n} of {total} across the whole sheet` with `about {minutes} min left for all {total}`, marked rough under five timed cards.
+  - **Auto-advance scrolled the next card to the viewport CENTRE**, so the card under judgement began half off the top. Now `block: 'start'` with `scroll-margin-top` clearing the sticky strips. Applied to the FINISHED document, never the core template — `extras=False` reproduces a pre-H779 shell byte-for-byte, and that fixture is what caught the first draft.
+  - Four new `UI_STRINGS` keys (`vote_*`), all translated in `RU_UI_STRINGS`. Opt out with `config["vote_ux"] = False`, which leaves no identifier behind.
+
+### Fixed (in the same layer, before release)
+
+- **The relocation must not name a layer that is switched off.** The first draft listed control ids in JS, so a sheet without facets still carried `facetbar` and one without the inbox still carried `inboxBtn` — breaking the absence contracts V12/V15/V16 each rely on. Controls are now tagged `data-submit` **at build time, only when present**, and moved by attribute.
+- **`VOTE_PROGRESS` reused V15's exact English default** (`decided {n} of {total}`), so translating one would silently rewrite the other. They are different readouts — V15's chip counts this pack, V17's bar the whole sheet — and now say so.
+
+### Tests
+
+- `tests/test_v17_vote_ux.py` — 24 cases incl. both absence directions, the donor-path exemption, and the V15 collision.
+- `tests/fixtures/smoke_v17_vote_ux_browser.py` — 12 checks in headless Chromium against real geometry (bar at y≈110, submit pinned at the viewport foot, advanced card at y≈96, ETA reading «≈1 мин на все 22»). Needs `playwright`.
+
 ## [0.20.0] - 2026-08-18
 
 ### Added
