@@ -5,6 +5,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-08-21
+
+### Added
+
+- **`split_layout` (opt-in).** `config["split_layout"] = True` with `item["left"]` / `item["right"]` renders a two-column grid at full viewport width (`main` has no 980px cap), wraps `item["store_markup"]` in a closed `<details>`, and mirrors the **current** card's vote / rating / note into the existing V17 `#voteBar` (the clone forwards clicks and input to the hidden original, so localStorage and export stay bound to the card id). Independent column scroll, 900px stack (DE then RU), insertion-chip tooltip pin on tap. `extras=False` ignores the flag (donor fixture stays byte-identical). Missing `left`/`right` raises `ValueError`. Tests: `tests/test_split_layout.py`.
+
 ## [0.21.0] - 2026-08-18
 
 ### Added
