@@ -1,6 +1,6 @@
 # csl-pyutil
 
-_Created: 14-07-2026 · Last updated: 17-08-2026_
+_Created: 14-07-2026 · Last updated: 21-08-2026_
 
 Generic (non-Sanskrit-specific) Python helpers shared across the CDSL /
 Sanskrit-Lexicon repos. Distinct from

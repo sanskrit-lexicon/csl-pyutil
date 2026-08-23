@@ -33,7 +33,7 @@ import warnings
 
 from csl_pyutil.evidence import PreflightError, PreflightWarning, preflight
 
-__version__ = "0.21.0"
+__version__ = "0.22.0"
 
 __all__ = ["render_review_sheet", "render_review_sheet_packset", "esc", "mark_cyrillic",
            "RU_UI_STRINGS"]
@@ -247,7 +247,7 @@ def _fmt_typology_chip(entry):
 
 
 def render_card(item, approve_label, reject_label, *, show_id=False, rating=None,
-                reject_labels=None):
+                reject_labels=None, split_layout=False):
     """Ported verbatim from build_h180_review_sheets.py — item shape:
     {"id", "filt", "title", "badges": [...], "question" (HTML), "panels":
     [(heading, html_body), ...], "note_placeholder" (optional), "title_href"
@@ -256,12 +256,32 @@ def render_card(item, approve_label, reject_label, *, show_id=False, rating=None
     the H2846 content standard: ``[{"label", "n", "share"}, ...]``, rendered
     as chips distinct from plain ``badges`` — see ``_check_typology_stats``)}.
 
-    With ``show_id=False``, ``rating=None``, ``reject_labels=None`` and no
-    ``title_href``/``typology`` the output is byte-identical to the v0.2.0
-    renderer (fixture contract)."""
-    panels = "".join(
-        '<div class="panel"><h4>%s</h4>%s</div>' % (esc(h4), body)
-        for h4, body in item["panels"])
+    ``split_layout=True`` (opt-in, 0.22.0) renders ``item["left"]`` /
+    ``item["right"]`` as a two-column grid and wraps ``item["store_markup"]``
+    in a closed ``<details>``. ``panels`` may be empty in that mode. With
+    ``show_id=False``, ``rating=None``, ``reject_labels=None``,
+    ``split_layout=False`` and no ``title_href``/``typology`` the output is
+    byte-identical to the v0.2.0 renderer (fixture contract)."""
+    if split_layout:
+        body = (
+            '<div class="card-split">'
+            '<div class="col-de">%s</div>'
+            '<div class="col-ru">%s</div>'
+            '</div>' % (item["left"], item["right"])
+        )
+        if item.get("store_markup"):
+            body += (
+                '<details class="store-details">'
+                '<summary class="store-link">store markup — quote this in the note</summary>'
+                '%s</details>' % item["store_markup"]
+            )
+        panel_src = item.get("panels") or ()
+    else:
+        panel_src = item["panels"]
+        body = ""
+    panels = body + "".join(
+        '<div class="panel"><h4>%s</h4>%s</div>' % (esc(h4), pbody)
+        for h4, pbody in panel_src)
     badges = "".join('<span class="badge">%s</span>' % esc(b) for b in item.get("badges", []))
     badges += "".join(_fmt_typology_chip(t) for t in item.get("typology", []))
     title_html = esc(item["title"])
@@ -1628,6 +1648,10 @@ UI_STRINGS = {
     "filter_unvoted": re.compile(
         r'(?P<pre><button data-filter="unvoted">)(?P<body>unvoted only)'
         r'(?P<post></button>)'),
+    # 0.22.0 split_layout — present only when config["split_layout"] is True.
+    "store_summary": re.compile(
+        r'(?P<pre><summary class="store-link">)(?P<body>store markup — quote this in the note)'
+        r'(?P<post></summary>)'),
 }
 
 
@@ -1714,6 +1738,7 @@ RU_UI_STRINGS = {
     "doc_lang": "ru",
     "filter_all": "все",
     "filter_unvoted": "только непроголосованные",
+    "store_summary": "разметка store — цитировать в заметке",
 }
 
 
@@ -2211,6 +2236,208 @@ def _tag_submit_controls(doc):
         doc = doc.replace(anchor, head + ' data-submit="1" ' + rest, 1)
         n += 1
     return doc, n
+
+
+# ----------------------------------------------------------------------------- split_layout (0.22.0)
+# Opt-in two-column DE|RU chrome. extras=False never sees this flag (donor
+# fixture). When True: wide main, independent-scroll columns, store anatomy
+# behind a closed <details>, current-card vote controls mirrored into the
+# existing V17 #voteBar (clicks write the hidden original, not the clone).
+_SPLIT_LAYOUT_CSS = '''  body.split-layout main { max-width: none; padding: 10px 16px; }
+  body.split-layout footer.hint { max-width: none; padding: 0 16px; }
+  body.split-layout .savebanner { max-width: none; }
+  body.split-layout .legend { max-width: none !important; }
+  body.split-layout .facetbar { max-width: none; }
+  .card-split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: stretch; }
+  .col-de, .col-ru { min-height: 0; overflow: auto; max-height: calc(100vh - 220px); }
+  body.split-layout .card > .controls,
+  body.split-layout .card > textarea.note,
+  body.split-layout .card > .ratingrow,
+  body.split-layout .card > .rejectlabelrow { display: none !important; }
+  body.split-layout .votebar, body.split-layout #voteBar {
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 20; margin-top: 0;
+  }
+  body.split-layout { padding-bottom: 160px; }
+  .store-details { margin-top: 10px; font-size: 13px; }
+  .store-details summary.store-link { cursor: pointer; color: var(--accent); }
+  .pair-hl { outline: 2px solid var(--accent); background: #1a2744; border-radius: 6px; }
+  .ins-chip { position: relative; display: inline-block; cursor: help; }
+  .ins-chip .chip-tip {
+    display: none; position: absolute; left: 0; top: 100%; z-index: 30;
+    max-width: min(42vw, 520px); white-space: pre-wrap; word-break: break-word;
+    background: #11141a; border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 10px; color: var(--text); font-size: 12px; font-weight: 400;
+    box-shadow: 0 8px 24px #0008;
+  }
+  .ins-chip:hover .chip-tip, .ins-chip.pinned .chip-tip { display: block; }
+  .split-mirror { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: 1 1 auto; }
+  .split-mirror textarea.note { min-width: 240px; flex: 1 1 240px; margin-top: 0; min-height: 44px; }
+  @media (max-width: 900px) {
+    .card-split { grid-template-columns: 1fr; }
+    .col-de, .col-ru { max-height: none; }
+  }
+'''
+
+_SPLIT_LAYOUT_JS = r'''
+  (function splitLayout() {
+    var bar = document.getElementById('voteBar');
+    function refreshMirror(wrap, card) {
+      if (!wrap || !card) return;
+      var rec = state[card.getAttribute('data-id')] || {};
+      wrap.querySelectorAll('button.vote').forEach(function (b) {
+        b.classList.toggle('active', b.getAttribute('data-vote') === rec.decision);
+      });
+      var vs = wrap.querySelector('.vote-state');
+      if (vs) vs.textContent = rec.decision ? rec.decision : 'unvoted';
+      var ta = wrap.querySelector('textarea.note');
+      var srcTa = card.querySelector('textarea.note');
+      if (ta && srcTa && document.activeElement !== ta) ta.value = srcTa.value;
+      wrap.querySelectorAll('button.rate').forEach(function (b) {
+        var src = card.querySelector('button.rate[data-rate="' + b.getAttribute('data-rate') + '"]');
+        if (src) b.className = src.className;
+      });
+    }
+    function mirrorCard(card) {
+      if (!bar || !card) return;
+      var id = card.getAttribute('data-id');
+      var old = bar.querySelector('.split-mirror');
+      if (old && old.getAttribute('data-mirror-id') === id) {
+        refreshMirror(old, card);
+        return;
+      }
+      if (old) old.remove();
+      var wrap = document.createElement('div');
+      wrap.className = 'split-mirror';
+      wrap.setAttribute('data-mirror-id', id);
+      function forwardClick(src) {
+        var c = src.cloneNode(true);
+        c.addEventListener('click', function (e) {
+          e.preventDefault();
+          src.click();
+          refreshMirror(wrap, card);
+        });
+        return c;
+      }
+      var controls = card.querySelector('.controls');
+      if (controls) {
+        controls.querySelectorAll('button.vote').forEach(function (b) { wrap.appendChild(forwardClick(b)); });
+        var st = controls.querySelector('.vote-state');
+        if (st) wrap.appendChild(st.cloneNode(true));
+      }
+      var rating = card.querySelector('.ratingrow');
+      if (rating) {
+        rating.querySelectorAll('button.rate').forEach(function (b) { wrap.appendChild(forwardClick(b)); });
+      }
+      var srcTa = card.querySelector('textarea.note');
+      if (srcTa) {
+        var ta = document.createElement('textarea');
+        ta.className = 'note';
+        ta.setAttribute('placeholder', srcTa.getAttribute('placeholder') || '');
+        ta.value = srcTa.value;
+        ta.addEventListener('input', function () {
+          srcTa.value = ta.value;
+          srcTa.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        wrap.appendChild(ta);
+      }
+      var spacer = bar.querySelector('.spacer');
+      if (spacer) bar.insertBefore(wrap, spacer);
+      else bar.insertBefore(wrap, bar.firstChild);
+      refreshMirror(wrap, card);
+    }
+    var current = null;
+    function pickCard() {
+      var cards = document.querySelectorAll('.card');
+      var mid = window.innerHeight / 2;
+      var best = null, bestDist = Infinity;
+      for (var i = 0; i < cards.length; i++) {
+        var r = cards[i].getBoundingClientRect();
+        if (r.bottom < 0 || r.top > window.innerHeight) continue;
+        var visible = Math.min(r.bottom, window.innerHeight) - Math.max(r.top, 0);
+        var dist = Math.abs(r.top - mid);
+        if (visible >= 0.4 * r.height && dist < bestDist) {
+          best = cards[i]; bestDist = dist;
+        }
+      }
+      if (!best) {
+        for (var j = 0; j < cards.length; j++) {
+          var r2 = cards[j].getBoundingClientRect();
+          var d2 = Math.abs(r2.top - mid);
+          if (d2 < bestDist) { best = cards[j]; bestDist = d2; }
+        }
+      }
+      return best;
+    }
+    function sync() {
+      var card = pickCard();
+      if (card) current = card;
+      if (current) mirrorCard(current);
+    }
+    if (typeof IntersectionObserver === 'function') {
+      var io = new IntersectionObserver(function () { sync(); }, { threshold: [0, 0.4, 1] });
+      document.querySelectorAll('.card').forEach(function (c) { io.observe(c); });
+    }
+    window.addEventListener('scroll', sync, { passive: true });
+    window.addEventListener('resize', sync);
+    sync();
+    var _apply = applyCardUI;
+    applyCardUI = function (card) {
+      _apply(card);
+      var m = bar && bar.querySelector('.split-mirror');
+      if (m && m.getAttribute('data-mirror-id') === card.getAttribute('data-id')) {
+        refreshMirror(m, card);
+      }
+    };
+    document.addEventListener('click', function (e) {
+      var chip = e.target.closest('.ins-chip');
+      if (chip) {
+        if (chip.classList.contains('pinned')) chip.classList.remove('pinned');
+        else {
+          document.querySelectorAll('.ins-chip.pinned').forEach(function (x) { x.classList.remove('pinned'); });
+          chip.classList.add('pinned');
+        }
+        e.stopPropagation();
+        return;
+      }
+      if (!e.target.closest('.chip-tip')) {
+        document.querySelectorAll('.ins-chip.pinned').forEach(function (x) { x.classList.remove('pinned'); });
+      }
+      var pairEl = e.target.closest('[data-pair]');
+      if (!pairEl) return;
+      var card = pairEl.closest('.card');
+      if (!card) return;
+      var pair = pairEl.getAttribute('data-pair');
+      card.querySelectorAll('.pair-hl').forEach(function (n) { n.classList.remove('pair-hl'); });
+      card.querySelectorAll('[data-pair="' + pair + '"]').forEach(function (n) { n.classList.add('pair-hl'); });
+      var col = pairEl.closest('.col-de, .col-ru');
+      var other = card.querySelector(col && col.classList.contains('col-de') ? '.col-ru' : '.col-de');
+      if (other) {
+        var tgt = other.querySelector('[data-pair="' + pair + '"]');
+        if (tgt && tgt.scrollIntoView) tgt.scrollIntoView({ block: 'nearest' });
+      }
+    });
+  })();
+'''
+
+
+def _add_split_layout(doc):
+    """Wide two-column chrome + vote-bar mirror. extras=True only."""
+    if "<body>" not in doc:
+        raise ValueError("review-sheet body anchor is missing")
+    doc = doc.replace("<body>", '<body class="split-layout">', 1)
+    doc = doc.replace(
+        "  main { max-width:980px; margin:0 auto; padding:10px 20px; }",
+        "  main { max-width:none; margin:0 auto; padding:10px 16px; }",
+        1,
+    )
+    doc = doc.replace(
+        "  footer.hint { max-width:980px; margin:20px auto; padding:0 20px; color:var(--muted); font-size:12px; }",
+        "  footer.hint { max-width:none; margin:20px auto; padding:0 16px; color:var(--muted); font-size:12px; }",
+        1,
+    )
+    if "</style>" in doc:
+        doc = doc.replace("</style>", _SPLIT_LAYOUT_CSS + "</style>", 1)
+    return doc.replace("})();\n</script>", _SPLIT_LAYOUT_JS + "})();\n</script>", 1)
 
 
 def _add_vote_ux(doc, packset_total):
@@ -2804,6 +3031,15 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
     ``save_banner`` (see its own docstring for why). Enable with one line:
     ``config["ui_strings"] = RU_UI_STRINGS``.
 
+    Split layout (0.22.0, ``extras=True`` only — default OFF):
+
+    - ``config["split_layout"]``: two full-width columns (``item["left"]`` /
+      ``item["right"]``), store anatomy in a closed ``<details>`` from
+      ``item["store_markup"]``, and the current card's vote/rating/note
+      mirrored into the V17 ``#voteBar``. ``main`` has no 980px cap. Sheets
+      without ``left``/``right`` raise ``ValueError``. ``extras=False``
+      ignores the flag so the donor fixture stays byte-identical.
+
     Mobile layer (H2854 step 2, decision 12, ``extras=True`` only — always on,
     no config flag): one ``@media (max-width: 640px)`` block — buttons ≥44px,
     panels single-column, a compressed sticky header, wrapping filter chips.
@@ -2909,6 +3145,17 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
     vote_ux = config.get("vote_ux", True)
     if not isinstance(vote_ux, bool):
         raise TypeError("vote_ux must be a bool")
+    split_layout = bool(config.get("split_layout", False))
+    if split_layout and extras:
+        for it in items:
+            if not it.get("left") or not it.get("right"):
+                raise ValueError(
+                    "split_layout=True requires item['left'] and item['right'] "
+                    "(id=%r)" % (it.get("id"),)
+                )
+    elif split_layout and not extras:
+        # Donor path must stay byte-identical; the flag is invisible here.
+        split_layout = False
     packset_total = config.get("packset_total")
     if packset_total is not None:
         if not isinstance(packset_total, int) or isinstance(packset_total, bool):
@@ -2928,7 +3175,8 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
     standard_on = bool(show_ids or rating is not None or save_as or note_min_height_px is not None
                        or any(it.get("title_href") for it in items))
     cards = "\n".join(render_card(it, config["approve_label"], config["reject_label"],
-                                  show_id=show_ids, rating=rating, reject_labels=reject_labels)
+                                  show_id=show_ids, rating=rating, reject_labels=reject_labels,
+                                  split_layout=split_layout)
                       for it in items)
     filters = ('<button data-filter="all" class="active">all</button>'
                + "".join('<button data-filter="%s">%s</button>' % (esc(k), esc(l))
@@ -3028,6 +3276,9 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
         # Last of the DOM layers: it relocates controls the earlier layers
         # installed, so all of them must already be in the document.
         doc = _add_vote_ux(doc, packset_total)
+    if split_layout:
+        # After V17 so #voteBar exists for the current-card mirror.
+        doc = _add_split_layout(doc)
     doc = _localize(doc, config.get("ui_strings"))
     # Last, on the finished document: the script-purity and citation checks must see
     # exactly what the reviewer will see, translations and all.
