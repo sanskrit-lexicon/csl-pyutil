@@ -5,6 +5,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-08-29
+
+### Added
+
+- **Every base-mode export now embeds a top-level `reviewedAt` vote stamp (H3697).** The base `exportPayload()` already wrote the browser-stamped export moment into `generated` — the S6 census (H3378) misread that key as the sheet build date, reported the vote leg of the round trip as unmeasured (0/23), and its «issued → applied» figures were actually vote → applied. From 0.23.0 the base payload captures one `nowIso` and writes it to both `generated` (byte-compatible for existing consumers) and `reviewedAt` (the key the census and strict mode already speak); the V16 inbox pack projection forwards `reviewedAt` so `merge_vote_packs.py`-assembled exports stay measurable. Strict exports are unchanged (`reviewedAt` stays the policy-gated vote time, `generated` the sheet build date). Forward-only: awaiting-vote sheets are never silently regenerated (LockCollision). Tests: `tests/test_review_sheet.py::test_base_export_embeds_reviewedat_export_stamp`, `tests/test_v16_packset.py::test_inbox_payload_carries_reviewedat`.
+
 ## [0.22.0] - 2026-08-21
 
 ### Added

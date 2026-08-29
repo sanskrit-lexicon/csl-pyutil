@@ -33,7 +33,7 @@ import warnings
 
 from csl_pyutil.evidence import PreflightError, PreflightWarning, preflight
 
-__version__ = "0.22.0"
+__version__ = "0.23.0"
 
 __all__ = ["render_review_sheet", "render_review_sheet_packset", "esc", "mark_cyrillic",
            "RU_UI_STRINGS"]
@@ -359,7 +359,8 @@ _AUTOSAVE_JS = '''
       ids.forEach(function (id) { syncNoteFromDom(id); });
     }
     var decided = ids.filter(function (id) { return state[id] && state[id].decision; }).length;
-    return JSON.stringify({ sheet_id: SHEET_ID, generated: new Date().toISOString(), decided: decided,
+    var nowIso = new Date().toISOString();
+    return JSON.stringify({ sheet_id: SHEET_ID, generated: nowIso, reviewedAt: nowIso, decided: decided,
       items: ids.map(function (id) { var rec = state[id] || {}; return { id: id, decision: rec.decision || null, note: rec.note || '' }; }) }, null, 2);
   }
   function scheduleAutosave() {
@@ -389,7 +390,8 @@ _AUTOSAVE_EXPORT_FUNCTION = '''  function exportPayload() {
       ids.forEach(function (id) { syncNoteFromDom(id); });
     }
     var decided = ids.filter(function (id) { return state[id] && state[id].decision; }).length;
-    return JSON.stringify({ sheet_id: SHEET_ID, generated: new Date().toISOString(), decided: decided,
+    var nowIso = new Date().toISOString();
+    return JSON.stringify({ sheet_id: SHEET_ID, generated: nowIso, reviewedAt: nowIso, decided: decided,
       items: ids.map(function (id) { var rec = state[id] || {}; return { id: id, decision: rec.decision || null, note: rec.note || '' }; }) }, null, 2);
   }
 '''
@@ -2553,7 +2555,7 @@ def _inbox_js(inbox, pack_no, card_questions):
   function __inboxPayload() {
     var base = JSON.parse(exportPayload());
     return { sheet_id: base.sheet_id, pack: INBOX.pack, generated: base.generated,
-             decided: base.decided,
+             reviewedAt: base.reviewedAt, decided: base.decided,
              items: base.items.map(function (it) {
                var out = { id: it.id, decision: it.decision };
                if (__inboxNoteOk(it.id, it.note)) out.note = it.note;
@@ -2899,6 +2901,14 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
         Strict exports add top-level ``reviewer``, ``reviewedAt``, and
         ``complete`` fields. Partial auto-saves remain possible with
         ``complete:false``; final download is blocked until the policy passes.
+
+        Since 0.23.0 (H3697) EVERY export also carries a top-level
+        ``reviewedAt`` export stamp: the base payload already wrote the export
+        moment into ``generated``, so the explicit key makes the vote moment
+        machine-readable everywhere (the S6 census greps ``reviewedAt``), while
+        ``generated`` is kept byte-compatible for existing consumers. In strict
+        exports ``reviewedAt`` remains the policy-gated vote time and
+        ``generated`` stays the sheet build date.
 
     19-07-2026 standard options (all optional and additive — with none of
     them set, and no item carrying ``title_href``, output is unchanged):
