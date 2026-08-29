@@ -172,6 +172,13 @@ def test_inbox_button_present_when_configured():
     assert "__inboxHydrate();" in out["packs"][0]
 
 
+def test_inbox_payload_carries_reviewedat():
+    """H3697: the pack projection keeps the vote stamp (everything else it
+    deliberately drops) so pack-merged decisions.json stays measurable."""
+    out = _packset(_n_items(11), github_inbox=_INBOX)
+    assert "reviewedAt: base.reviewedAt," in out["packs"][0]
+
+
 def test_inbox_enabled_needs_both_client_id_and_relay():
     out = _packset(_n_items(11), github_inbox=_INBOX)
     inbox = json.loads(re.search(r"var INBOX = (\{.*?\});", out["packs"][0]).group(1))

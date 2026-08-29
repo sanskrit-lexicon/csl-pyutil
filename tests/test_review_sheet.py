@@ -112,6 +112,15 @@ def test_decisions_json_contract_fields_present():
     assert "note: rec.note" in out
 
 
+def test_base_export_embeds_reviewedat_export_stamp():
+    """H3697: every base export carries ``reviewedAt`` — the same single
+    browser-stamped instant as ``generated`` — so the vote leg is
+    machine-readable everywhere without waiting on strict mode."""
+    out = render_review_sheet(_items(), _config())
+    assert "var nowIso = new Date().toISOString();" in out
+    assert "generated: nowIso, reviewedAt: nowIso," in out
+
+
 def test_vote_syncs_note_from_dom_before_decision():
     """csl-pyutil#1 Part 1 / H1523: second vote must not drop a live note."""
     out = render_review_sheet(_items(), _config())
