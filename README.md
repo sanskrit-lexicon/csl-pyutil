@@ -1,6 +1,6 @@
 # csl-pyutil
 
-_Created: 14-07-2026 · Last updated: 21-08-2026_
+_Created: 14-07-2026 · Last updated: 05-09-2026_
 
 Generic (non-Sanskrit-specific) Python helpers shared across the CDSL /
 Sanskrit-Lexicon repos. Distinct from
@@ -102,7 +102,7 @@ Partial File System Access API auto-saves use `complete: false` and
 every item is voted, and every rejected item has a note. Callers that omit
 `strict_review` retain the 0.1.x behavior and byte-identical core rendering.
 
-See [`csl_pyutil/review_sheet.py`](csl_pyutil/review_sheet.py) for the full
+See [`csl_pyutil/review_sheet.py`](https://github.com/sanskrit-lexicon/csl-pyutil/blob/main/csl_pyutil/review_sheet.py) for the full
 item/config schema docstring.
 
 ### Presentation (0.5.0)
@@ -251,3 +251,5 @@ pytest tests -q
 through the donor's own render functions — never real translation data (the
 donor's own gitignored/unpublished pwg_ru store must never land in this
 public repo).
+
+_Dr. Mārcis Gasūns_

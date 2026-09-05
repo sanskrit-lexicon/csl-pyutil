@@ -1,3 +1,5 @@
+_Created: 14-07-2026 · Last updated: 05-09-2026_
+
 # Changelog
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
@@ -524,3 +526,5 @@ HTML review/voting sheet emitter, ported byte-for-byte (fixture-tested) from
 the richest of six independently hand-rolled review-sheet shells found across
 four repos. `extras=True` folds in H779's mandated File System Access API
 auto-save + button-legend footer, which no existing shell had implemented.
+
+_Dr. Mārcis Gasūns_
