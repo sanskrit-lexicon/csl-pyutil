@@ -81,6 +81,27 @@ def test_extras_adds_save_button_and_legend():
     assert "class=\"legend\"" in out
 
 
+def test_save_to_folder_flushes_before_reporting_success():
+    """Choosing a path must write immediately and await close().
+
+    The old one-second timer let navigation destroy the page after the picker
+    had created/truncated the file but before any bytes were written.
+    """
+    out = render_review_sheet(_items(), _config(), extras=True)
+    assert "function flushAutosave()" in out
+    assert "var payload = exportPayload();" in out
+    assert "return writable.write(payload).then(function () { return writable.close(); })" in out
+    picker = out.split("showSaveFilePicker", 1)[1].split("});\n  }", 1)[0]
+    assert "return flushAutosave();" in picker
+    assert "scheduleAutosave();" not in picker
+
+
+def test_save_to_folder_blocks_navigation_while_write_is_pending():
+    out = render_review_sheet(_items(), _config(), extras=True)
+    assert "window.addEventListener('beforeunload'" in out
+    assert "if (!saveWritePending) return;" in out
+
+
 def test_extras_false_matches_donor_core_shape():
     out = render_review_sheet(_items(), _config(), extras=False)
     assert 'id="saveBtn"' not in out
