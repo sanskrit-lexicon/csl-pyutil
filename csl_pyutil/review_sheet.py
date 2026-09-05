@@ -33,7 +33,7 @@ import warnings
 
 from csl_pyutil.evidence import PreflightError, PreflightWarning, preflight
 
-__version__ = "0.23.0"
+__version__ = "0.23.1"
 
 __all__ = ["render_review_sheet", "render_review_sheet_packset", "esc", "mark_cyrillic",
            "RU_UI_STRINGS"]
@@ -353,7 +353,11 @@ _LEGEND_HTML = '''<div class="legend" style="max-width:980px;margin:0 auto 20px;
 '''
 
 _AUTOSAVE_JS = '''
-  var saveHandle = null, saveTimer = null;
+  var saveHandle = null, saveTimer = null, saveWritePending = 0;
+  var saveWriteChain = Promise.resolve();
+  var SAVE_SAVING = 'Saving…';
+  var SAVE_SAVED = 'Saved';
+  var SAVE_FAILED = 'Save failed — retry';
   function exportPayload() {
     if (typeof syncNoteFromDom === 'function') {
       ids.forEach(function (id) { syncNoteFromDom(id); });
@@ -363,13 +367,34 @@ _AUTOSAVE_JS = '''
     return JSON.stringify({ sheet_id: SHEET_ID, generated: nowIso, reviewedAt: nowIso, decided: decided,
       items: ids.map(function (id) { var rec = state[id] || {}; return { id: id, decision: rec.decision || null, note: rec.note || '' }; }) }, null, 2);
   }
+  function flushAutosave() {
+    if (!saveHandle) return Promise.resolve(false);
+    clearTimeout(saveTimer);
+    var payload = exportPayload();
+    saveWritePending++;
+    var writeJob = saveWriteChain.then(function () {
+      return saveHandle.createWritable().then(function (writable) {
+        return writable.write(payload).then(function () { return writable.close(); });
+      });
+    });
+    var tracked = writeJob.then(function () {
+      saveWritePending--; return true;
+    }, function (error) {
+      saveWritePending--; throw error;
+    });
+    saveWriteChain = tracked.catch(function () {});
+    return tracked;
+  }
+  function saveStatus(message) {
+    var saveBtn = document.getElementById('saveBtn');
+    if (saveBtn) saveBtn.textContent = message;
+  }
   function scheduleAutosave() {
     if (!saveHandle) return;
     clearTimeout(saveTimer);
     saveTimer = setTimeout(function () {
-      saveHandle.createWritable().then(function (w) {
-        w.write(exportPayload()).then(function () { w.close(); });
-      }).catch(function () {});
+      flushAutosave().then(function () { saveStatus(SAVE_SAVED); })
+        .catch(function () { saveStatus(SAVE_FAILED); });
     }, 1000);
   }
   var _origSave = save;
@@ -379,10 +404,19 @@ _AUTOSAVE_JS = '''
     saveBtn.style.display = '';
     saveBtn.addEventListener('click', function () {
       window.showSaveFilePicker({suggestedName: SHEET_ID + '_decisions.json'}).then(function (h) {
-        saveHandle = h; scheduleAutosave();
-      }).catch(function () {});
+        saveHandle = h; saveStatus(SAVE_SAVING); return flushAutosave();
+      }).then(function (saved) {
+        if (saved) saveStatus(SAVE_SAVED);
+      }).catch(function (error) {
+        if (!error || error.name !== 'AbortError') saveStatus(SAVE_FAILED);
+      });
     });
   }
+  window.addEventListener('beforeunload', function (event) {
+    if (!saveWritePending) return;
+    event.preventDefault();
+    event.returnValue = '';
+  });
 '''
 
 _AUTOSAVE_EXPORT_FUNCTION = '''  function exportPayload() {
@@ -472,7 +506,7 @@ def _add_strict_review(doc, policy):
         "  function exportPayload() {\n    return JSON.stringify(strictPayload(), null, 2);\n  }\n",
         1,
     )
-    autosave_anchor = "\n  var saveHandle = null, saveTimer = null;"
+    autosave_anchor = "\n  var saveHandle = null, saveTimer = null, saveWritePending = 0;"
     if autosave_anchor not in doc:
         raise ValueError("review-sheet auto-save anchor is missing")
     return doc.replace(autosave_anchor, _strict_review_js(policy) + autosave_anchor, 1)
@@ -1534,6 +1568,12 @@ UI_STRINGS = {
     # quoted mention of the same label inside the footer hint.
     "download_button": "Download decisions.json",
     "save_button": "Save to folder…",
+    "save_saving": re.compile(
+        r"(?P<pre>var SAVE_SAVING = ')(?P<body>[^']*)(?P<post>';)"),
+    "save_saved": re.compile(
+        r"(?P<pre>var SAVE_SAVED = ')(?P<body>[^']*)(?P<post>';)"),
+    "save_failed": re.compile(
+        r"(?P<pre>var SAVE_FAILED = ')(?P<body>[^']*)(?P<post>';)"),
     # Everything after the caller's own `footer` text, up to </footer>: the keyboard
     # legend and the localStorage/export note.
     "footer_hint": re.compile(r"(?P<body>Keyboard:.*?)(?=</footer>)", re.DOTALL),
@@ -1683,6 +1723,9 @@ UI_STRINGS = {
 RU_UI_STRINGS = {
     "download_button": "Скачать decisions.json",
     "save_button": "Сохранить в папку…",
+    "save_saving": "Сохраняю…",
+    "save_saved": "Сохранено",
+    "save_failed": "Ошибка сохранения — повторить",
     "footer_hint": (
         'Клавиши: <kbd>a</kbd> одобрить &middot; <kbd>r</kbd> отклонить &middot; '
         '<kbd>d</kbd> отложить &middot; <kbd>&darr;</kbd>/<kbd>&uarr;</kbd> дальше/назад. '

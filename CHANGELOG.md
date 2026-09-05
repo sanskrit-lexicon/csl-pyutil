@@ -5,6 +5,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.1] - 2026-09-05
+
+### Fixed
+
+- **“Save to folder…” can no longer leave a zero-byte decision export when the reviewer moves to the next pack quickly** (Codex `gpt-5.6-sol`, 05-09-2026; found during H4093 (Codex) — Portfolio roadmap renewal for revenue, Sanskrit research, and pedagogy). The file-picker path now writes immediately, serializes every later autosave, awaits both `write()` and `close()`, exposes `Saving…` / `Saved` / retry status, and raises the browser's navigation guard while a write is pending. Previously the picker created or truncated the target and only scheduled the first write one second later; leaving the page in that window cancelled the timer, while a blanket empty `catch` concealed the failure. Two regression tests cover immediate flush and pending-write navigation protection; the new status strings are part of `UI_STRINGS` and `RU_UI_STRINGS`.
+
 ## [0.23.0] - 2026-08-29
 
 ### Added
