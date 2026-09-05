@@ -179,6 +179,17 @@ def test_inbox_payload_carries_reviewedat():
     assert "reviewedAt: base.reviewedAt," in out["packs"][0]
 
 
+def test_inbox_announces_when_no_more_human_work_remains():
+    """A packset is human-complete only when every remote pack is complete."""
+    out = _packset(_n_items(22), github_inbox=_INBOX)
+    js = out["packs"][-1]
+    assert "function __inboxCompletion()" in js
+    assert "doc.decided === doc.items.length" in js
+    assert "doc.items.every(function (it) { return !!it.decision; })" in js
+    assert "if (complete === INBOX.packs) __inboxSay(INBOX_COMPLETE" in js
+    assert "All {packs} packs received. Nothing more is expected from the human." in js
+
+
 def test_inbox_enabled_needs_both_client_id_and_relay():
     out = _packset(_n_items(11), github_inbox=_INBOX)
     inbox = json.loads(re.search(r"var INBOX = (\{.*?\});", out["packs"][0]).group(1))
