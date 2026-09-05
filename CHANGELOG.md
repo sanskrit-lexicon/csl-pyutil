@@ -5,6 +5,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **GitHub-backed packsets now state explicitly when the human is finished** (Codex `gpt-5.6-sol`, 05-09-2026; prompted by H4093 (Codex) — Portfolio roadmap renewal for revenue, Sanskrit research, and pedagogy). After hydration or a successful GitHub save, the sheet verifies that every expected `pack-NN.json` belongs to the current sheet and contains a decision for every item. Only then does it display “All {packs} packs received. Nothing more is expected from the human.” The terminal state is also localized in Russian; missing, partial, malformed, or foreign-sheet packs do not trigger it.
+
 ## [0.23.1] - 2026-09-05
 
 ### Fixed

@@ -1668,6 +1668,8 @@ UI_STRINGS = {
         r"(?P<pre>var INBOX_HYDRATED = ')(?P<body>[^']*)(?P<post>';)"),
     "inbox_saved": re.compile(
         r"(?P<pre>var INBOX_SAVED = ')(?P<body>[^']*)(?P<post>';)"),
+    "inbox_complete": re.compile(
+        r"(?P<pre>var INBOX_COMPLETE = ')(?P<body>[^']*)(?P<post>';)"),
     "inbox_disabled": re.compile(
         r"(?P<pre>var INBOX_DISABLED = ')(?P<body>[^']*)(?P<post>';)"),
     "inbox_code": re.compile(
@@ -1775,6 +1777,7 @@ RU_UI_STRINGS = {
     "inbox_pulling": "подтягиваю голоса…",
     "inbox_hydrated": "подтянуто {n} голос(ов) с GitHub",
     "inbox_saved": "пакет {pack} сохранён в GitHub",
+    "inbox_complete": "Все пакеты ({packs}) получены. От человека больше ничего не требуется.",
     "inbox_disabled": "нет OAuth client_id / релея device-flow — используйте «Скачать decisions.json»",
     "inbox_code": "откройте {url} и введите код {code}",
     "inbox_failed": "сохранить в GitHub не удалось: {why}",
@@ -2574,6 +2577,7 @@ def _inbox_js(inbox, pack_no, card_questions):
   var INBOX_PULLING = 'pulling votes from GitHub…';
   var INBOX_HYDRATED = 'pulled {n} vote(s) from GitHub';
   var INBOX_SAVED = 'saved pack {pack} to GitHub';
+  var INBOX_COMPLETE = 'All {packs} packs received. Nothing more is expected from the human.';
   var INBOX_DISABLED = 'no OAuth client_id / device relay configured — use Download decisions.json';
   var INBOX_CODE = 'open {url} and enter code {code}';
   var INBOX_FAILED = 'GitHub save failed: {why}';
@@ -2604,6 +2608,33 @@ def _inbox_js(inbox, pack_no, card_questions):
                if (__inboxNoteOk(it.id, it.note)) out.note = it.note;
                return out;
              }) };
+  }
+  function __inboxCompletion() {
+    return fetch(__inboxDir() + '?t=' + Date.now()).then(function (r) {
+      return r.ok ? r.json() : [];
+    }).then(function (list) {
+      if (!Array.isArray(list)) return false;
+      var byName = {};
+      list.forEach(function (f) { byName[f.name] = f; });
+      var reads = [];
+      for (var n = 1; n <= INBOX.packs; n++) {
+        var name = 'pack-' + ('0' + n).slice(-2) + '.json';
+        var file = byName[name];
+        reads.push(file ? fetch(file.download_url + '?t=' + Date.now()).then(function (r) {
+          return r.ok ? r.json() : null;
+        }).catch(function () { return null; }) : Promise.resolve(null));
+      }
+      return Promise.all(reads).then(function (docs) {
+        var complete = docs.filter(function (doc, index) {
+          return doc && doc.sheet_id === SHEET_ID && doc.pack === index + 1
+            && Array.isArray(doc.items) && doc.items.length > 0
+            && doc.decided === doc.items.length
+            && doc.items.every(function (it) { return !!it.decision; });
+        }).length;
+        if (complete === INBOX.packs) __inboxSay(INBOX_COMPLETE.replace('{packs}', INBOX.packs));
+        return complete === INBOX.packs;
+      });
+    }).catch(function () { return false; });
   }
   // The pull is two network hops, and the second one -- raw.githubusercontent.com,
   // once per decisions file -- is routinely slow to settle, sometimes past 10 s,
@@ -2645,7 +2676,7 @@ def _inbox_js(inbox, pack_no, card_questions):
               save();
               document.querySelectorAll('.card').forEach(function (c) { applyCardUI(c); });
             }
-            done(merged);
+            __inboxCompletion().then(function (complete) { if (!complete) done(merged); });
           });
       });
     }).catch(function () { done(0); });
@@ -2676,6 +2707,7 @@ def _inbox_js(inbox, pack_no, card_questions):
       .then(function (r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         __inboxSay(INBOX_SAVED.replace('{pack}', INBOX.pack_name));
+        return __inboxCompletion();
       });
   }
   // GitHub does not send Access-Control-Allow-Origin on login/device/* (measured
