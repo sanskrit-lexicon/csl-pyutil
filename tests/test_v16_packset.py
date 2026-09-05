@@ -400,6 +400,22 @@ def test_inbox_read_omits_ref_when_no_branch_is_named():
     assert "INBOX.branch ? '?ref=' + encodeURIComponent(INBOX.branch) : ''" in out["packs"][0]
 
 
+def test_inbox_reuses_one_device_token_across_pack_navigation():
+    """Saving four packs in one tab must require one GitHub device approval.
+
+    sessionStorage survives same-origin pack navigation but disappears when the
+    browser tab/session closes; this avoids both per-pack prompts and durable
+    storage of a public_repo token.
+    """
+    js = _packset(_n_items(22), github_inbox=_INBOX)["packs"][0]
+    assert "sessionStorage.getItem(INBOX_TOKEN_KEY)" in js
+    assert "sessionStorage.setItem(INBOX_TOKEN_KEY, token)" in js
+    assert "__inboxToken().then(__inboxPut)" in js
+    assert "__inboxDeviceToken().then(__inboxPut)" not in js
+    assert "sessionStorage.removeItem(INBOX_TOKEN_KEY)" in js
+    assert "if (!e || !e.inboxAuth) throw e;" in js
+
+
 # --------------------------------------------------------------------- pulling hint (0.19.0)
 
 def test_hydrate_announces_before_the_slow_hop():

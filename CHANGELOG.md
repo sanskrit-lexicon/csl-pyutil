@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.1] - 2026-09-05
+
+### Fixed
+
+- **A four-pack voting sheet now asks for one GitHub device authorization per browser-tab session, not one per pack** (Codex `gpt-5.6-sol`, 05-09-2026; reported during H4093 (Codex) — Portfolio roadmap renewal for revenue, Sanskrit research, and pedagogy). The access token was previously held only by the Promise that performed one save and was discarded immediately afterward, so Chrome and the in-app browser both started a fresh device flow on every pack. The token now lives in same-origin `sessionStorage`, survives navigation across packs and later voting sheets in that tab, and disappears when the tab session closes. A cached token rejected with HTTP 401 is cleared and receives exactly one fresh device-flow retry. The token is deliberately not placed in durable `localStorage`.
+
 ## [0.24.0] - 2026-09-05
 
 ### Added
