@@ -26,7 +26,7 @@ propagation had already failed once.
 ## `render_review_sheet()`
 
 ```sh
-pip install "csl-pyutil @ git+https://github.com/sanskrit-lexicon/csl-pyutil@main"
+pip install csl-pyutil   # from PyPI (0.24.1+, 19-09-2026); was git+main before
 ```
 
 ```python
