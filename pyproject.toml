@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "csl-pyutil"
-version = "0.24.1"
+version = "0.25.0"
 description = "Generic (non-Sanskrit-specific) Python helpers shared across the CDSL / Sanskrit-Lexicon repos"
 requires-python = ">=3.8"
 license = { text = "MIT" }
@@ -23,6 +23,12 @@ test = ["pytest"]
 
 [tool.setuptools]
 packages = ["csl_pyutil"]
+
+# The NKRYa offline fixtures (H5282) must ship with the wheel: `python -m
+# csl_pyutil.nkrya --selftest` is the documented consumer check and runs from an
+# installed package, not from a checkout.
+[tool.setuptools.package-data]
+csl_pyutil = ["fixtures/nkrya/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
