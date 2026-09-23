@@ -22,6 +22,11 @@ integrity_tripwire.check / .extract               committed checksum + key-set
                                                     on human-reviewed overlay
                                                     data, red in CI when a
                                                     seeder wipes it (H2891)
+nkrya.NkryaClient / nkrya.selftest               NKRYa (ruscorpora.ru) official-API
+                                                    client: disk cache, token-bucket
+                                                    throttle, 429/Retry-After backoff
+                                                    (H5282); CLI `python -m
+                                                    csl_pyutil.nkrya --selftest`
 """
 from csl_pyutil import anatomy, evidence
 from csl_pyutil.evidence import EvidenceManifest, PreflightError, PreflightWarning, preflight
@@ -35,7 +40,12 @@ from csl_pyutil.review_sheet import (render_review_sheet, render_review_sheet_pa
 # in — which it would, on every single tripwire run in every consumer repo. A
 # gate whose job is to be believed when it prints RED must not also print a
 # spurious RuntimeWarning every time it prints GREEN.
+#
+# `nkrya` (H5282) is lazy for a second reason: it is a network client with an
+# optional `keyring` dependency, and importing csl_pyutil for a review sheet
+# must not pull either in.
 _LAZY = {
+    "nkrya": None,
     "integrity_tripwire": None,
     "TripwireError": "integrity_tripwire",
     "project": "integrity_tripwire",
@@ -52,7 +62,8 @@ def __getattr__(name):
     if name in _LAZY:
         import importlib
 
-        module = importlib.import_module("csl_pyutil.integrity_tripwire")
+        owner = _LAZY[name] or name          # None = the submodule itself
+        module = importlib.import_module("csl_pyutil." + owner)
         return module if _LAZY[name] is None else getattr(module, name)
     raise AttributeError("module %r has no attribute %r" % (__name__, name))
 
@@ -60,9 +71,9 @@ def __getattr__(name):
 def __dir__():
     return sorted(list(globals()) + list(_LAZY))
 
-__version__ = "0.24.1"
+__version__ = "0.25.0"
 __all__ = ["render_review_sheet", "render_review_sheet_packset", "esc", "mark_cyrillic",
            "RU_UI_STRINGS", "anatomy", "evidence",
            "EvidenceManifest", "PreflightError", "PreflightWarning", "preflight",
            "integrity_tripwire", "TripwireError", "project", "overlay_digest",
-           "keyset_digest", "is_reviewed", "extract", "check"]
+           "keyset_digest", "is_reviewed", "extract", "check", "nkrya"]

@@ -1,4 +1,4 @@
-_Created: 14-07-2026 · Last updated: 05-09-2026_
+_Created: 14-07-2026 · Last updated: 24-09-2026_
 
 # Changelog
 
@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.25.0] - 2026-09-24
+
+### Added
+
+- **`csl_pyutil.nkrya` — the shared NKRYa (ruscorpora.ru) official-API client, with a 429-safe throttle** (Opus 4.8 `claude-opus-4-8`, 24-09-2026; H5282, ruling MG 23-09-2026). The client that lived in `SanskritLexicography/RussianTranslation/src/nkrya_client.py` (H5261) now lives here, so every consumer repo imports one implementation instead of copying it: `sketch()` (word-portrait collocates), `freq()` (ipm + category), `concordance()`/`pair()` (lex-gramm hits and snippets), the disk cache keyed by request hash, the ё-fold for portrait lemmas, and the fail-closed token lookup (env `RUSCORPORA_API_TOKEN` → macOS keychain `ruscorpora-api` → `keyring`). Two behaviours are new. **Throttle:** every live request passes a token bucket, default 6 requests/min with a burst of 3 (`rate_per_min`/`burst` constructor args, env `NKRYA_RATE_PER_MIN`/`NKRYA_BURST`) — live on 23-09-2026 the API answered HTTP 429 after roughly ten calls in a minute, where the old client only slept one second between calls. **429 handling:** a refusal honours `Retry-After` (delta-seconds or HTTP-date) when the server sends one, otherwise backs off exponentially, and the pause empties the bucket and delays its refill so every later call in the batch respects it too; up to five retries, so a single 429 never fails a batch run. 401/403 still fail immediately, and a 429 that outlives the retries raises rather than returning silently empty. The cache directory is per caller — constructor argument, else env `CSL_PYUTIL_NKRYA_CACHE`, else `~/.cache/csl_pyutil/nkrya` — and nothing repo-specific remains in the module. The offline fixtures ship inside the wheel, so `python -m csl_pyutil.nkrya --selftest` (10 checks, no token, no network) works from an installed package; `selftest(fixtures=…, client_class=…)` lets a consumer shim run the same checks against its own fixture copy and subclass.
 
 ## [0.24.1] - 2026-09-05
 

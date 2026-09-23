@@ -1,6 +1,6 @@
 # csl-pyutil
 
-_Created: 14-07-2026 · Last updated: 05-09-2026_
+_Created: 14-07-2026 · Last updated: 24-09-2026_
 
 Generic (non-Sanskrit-specific) Python helpers shared across the CDSL /
 Sanskrit-Lexicon repos. Distinct from
@@ -239,6 +239,44 @@ enter git: `redact_fields` names reviewed fields whose value is replaced by
 curator's verbatim free-text notes, watched precisely because a wipe of it is
 the failure mode — stays fully covered by the digest while publishing nothing
 into a public repo. The hash moves the instant a single character does.
+
+## `nkrya` — the shared NKRYa (ruscorpora.ru) API client
+
+```sh
+python -m csl_pyutil.nkrya --selftest          # 10 offline checks, no token, no network
+python -m csl_pyutil.nkrya freq кошка S
+python -m csl_pyutil.nkrya pair чёрный кошка --19c
+```
+
+```python
+from csl_pyutil.nkrya import NkryaClient
+
+cli = NkryaClient(cache_dir="pwg_ru/nkrya_cache")   # per-caller cache, never a shared default
+cli.freq("сплочённый", "A")        # {'ipm': 0.94, 'category': 1} — ё folded for portraits
+cli.sketch("слово", "S")           # {relation: [(collocate, dice), ...]} top 10 per relation
+cli.pair("чёрный", "кошка", n=3)   # {'hits': …, 'docs': …, 'lines': [...]}
+```
+
+Official API only (`https://ruscorpora.ru/api/v1`, Bearer token); scraping and the
+unofficial user clients are out of scope. Every response is cached on disk under the
+request hash, so a repeated question costs nothing and an `offline=True` client answers
+from cache alone (a miss raises `NkryaOffline` rather than returning empty).
+
+**Rate limit.** Live on 23-09-2026 the API answered HTTP 429 after roughly ten calls in
+a minute. Live requests therefore pass a token bucket — default 6/min, burst 3, set per
+client (`rate_per_min=`, `burst=`) or via `NKRYA_RATE_PER_MIN` / `NKRYA_BURST`. A 429
+honours `Retry-After` (seconds or HTTP-date) when the server sends one, otherwise backs
+off exponentially; the pause empties the bucket and delays its refill, so the rest of the
+batch respects it too. Up to five retries: one 429 never fails a batch run. 401/403 fail
+immediately with the token-storing hint.
+
+**Token** (never in git), first hit wins: env `RUSCORPORA_API_TOKEN` → macOS keychain
+service `ruscorpora-api` → `keyring` service `ruscorpora-api`, user `token`. No token is
+a hard stop before any network call, printing the exact command to store one.
+
+**Cache dir**: constructor argument, else `CSL_PYUTIL_NKRYA_CACHE`, else
+`~/.cache/csl_pyutil/nkrya`. A consumer shim passes its own repo-local path and can run
+the same selftest over its own fixture copy: `selftest(fixtures=…, client_class=…)`.
 
 ## Tests
 
