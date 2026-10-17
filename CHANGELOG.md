@@ -68,7 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Two more filter-bar chrome words `UI_STRINGS` never reached ([H2847](https://github.com/gasyoun/Uprava/blob/main/handoffs/H2847-Sonnet_Uprava_review-sheet-explanations-russian-only-and-jargon-expansion_15.08.26.md)).** `_CORE_TEMPLATE` bakes `"all"` / `"unvoted only"` straight into the filter buttons, same class of gap as the `count_suffix`/`generated_label`/`doc_lang` fix in 0.18.0. New keys `filter_all`, `filter_unvoted`; `RU_UI_STRINGS` carries both (`"все"` / `"только непроголосованные"`).
+- **Two more filter-bar chrome words `UI_STRINGS` never reached ([H2847](https://github.com/gasyoun/Uprava/blob/main/handoffs/archive/H2847-Sonnet_Uprava_review-sheet-explanations-russian-only-and-jargon-expansion_15.08.26.md)).** `_CORE_TEMPLATE` bakes `"all"` / `"unvoted only"` straight into the filter buttons, same class of gap as the `count_suffix`/`generated_label`/`doc_lang` fix in 0.18.0. New keys `filter_all`, `filter_unvoted`; `RU_UI_STRINGS` carries both (`"все"` / `"только непроголосованные"`).
 
 ## [0.19.1] - 2026-08-18
 
@@ -93,7 +93,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Five head/header chrome strings `UI_STRINGS` never reached ([H2847](https://github.com/gasyoun/Uprava/blob/main/handoffs/H2847-Sonnet_Uprava_review-sheet-explanations-russian-only-and-jargon-expansion_15.08.26.md)).** `_CORE_TEMPLATE` bakes `"%(n)d items"` into both `<title>` and `<h1>`, `"Generated %(generated)s"` into the subtitle line, `lang="en"` onto `<html>`, and the `"all"` / `"unvoted only"` filter-bar buttons — none reachable via `title`/`subtitle`/`footer`/`approve_label`/`reject_label`/`filters`, so a fully card-translated Russian sheet still leaked English into the browser tab, the document's declared language, and the filter bar. New keys `count_suffix`, `generated_label`, `doc_lang`, `filter_all`, `filter_unvoted`; `RU_UI_STRINGS` carries all five (`"карточек"` / `"Собрано"` / `"ru"` / `"все"` / `"только непроголосованные"`). Regression tests, including one exercising the preset directly.
+- **Five head/header chrome strings `UI_STRINGS` never reached ([H2847](https://github.com/gasyoun/Uprava/blob/main/handoffs/archive/H2847-Sonnet_Uprava_review-sheet-explanations-russian-only-and-jargon-expansion_15.08.26.md)).** `_CORE_TEMPLATE` bakes `"%(n)d items"` into both `<title>` and `<h1>`, `"Generated %(generated)s"` into the subtitle line, `lang="en"` onto `<html>`, and the `"all"` / `"unvoted only"` filter-bar buttons — none reachable via `title`/`subtitle`/`footer`/`approve_label`/`reject_label`/`filters`, so a fully card-translated Russian sheet still leaked English into the browser tab, the document's declared language, and the filter bar. New keys `count_suffix`, `generated_label`, `doc_lang`, `filter_all`, `filter_unvoted`; `RU_UI_STRINGS` carries all five (`"карточек"` / `"Собрано"` / `"ru"` / `"все"` / `"только непроголосованные"`). Regression tests, including one exercising the preset directly.
 
 ## [0.17.1] - 2026-08-18
 
@@ -109,7 +109,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **V16 — packs of 10 sharing one record, plus the public vote inbox ([H2991](https://github.com/gasyoun/Uprava/blob/main/handoffs/H2991-Opus_csl-pyutil_vote-w3-packs-oauth_17.08.26.md), W3 track B; plan [PLAN_UPRAVA_VOTE_PLATFORM_2026Q3.md](https://github.com/gasyoun/Uprava/blob/main/docs/PLAN_UPRAVA_VOTE_PLATFORM_2026Q3.md)).** A 320-card sheet is one HTML file and one sitting nobody finishes.
+- **V16 — packs of 10 sharing one record, plus the public vote inbox ([H2991](https://github.com/gasyoun/Uprava/blob/main/handoffs/archive/H2991-Opus_csl-pyutil_vote-w3-packs-oauth_17.08.26.md), W3 track B; plan [PLAN_UPRAVA_VOTE_PLATFORM_2026Q3.md](https://github.com/gasyoun/Uprava/blob/main/docs/PLAN_UPRAVA_VOTE_PLATFORM_2026Q3.md)).** A 320-card sheet is one HTML file and one sitting nobody finishes.
   - New entry point `render_review_sheet_packset(items, config, *, hub_name=None) -> {"parent", "packs"}`. `config["pack_size"]` (default **10**) splits a long sheet into `pack-NN.html` slices — 22 becomes 10+10+2 — under a parent index page carrying per-pack progress. `len(items) <= pack_size` returns `{"parent": None, "packs": [one sheet]}` **byte-identical to a plain `render_review_sheet`** call, so splitting a sheet that fits costs nothing and buys nothing.
   - **One `sheet_id` across parent and packs**, therefore one `STORE_KEY` per origin: pack 2 already knows what pack 1 decided, and the parent reads that same record. Each pack's own export still names only its slice, so a `decisions.json` describes exactly the cards that page could vote on.
   - **`config["github_inbox"]`** adds «Сохранить в GitHub» / **Save to GitHub**: each pack writes `decisions/<sheet_id>/pack-NN.json` to a public inbox repo (default `gasyoun/vote-inbox`) and hydrates from it on load, so a second machine resumes the same sitting. Scope is `public_repo` only; the inbox payload is **ids and verdicts**, never card text. A note ships only when it is ≤280 chars, carries no `<`, and is not the card's own question pasted back. Passing `client_secret`/`token`/`secret` in that mapping is a build error — the device flow needs no secret.
@@ -129,7 +129,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **U7 — typology / classification labels must carry their count and population share ([H2846](https://github.com/gasyoun/Uprava/blob/main/handoffs/H2846-Sonnet_Uprava_review-sheet-typology-requires-statistics-standard_15.08.26.md), new universal row in [`docs/REVIEW_SHEET_CONTENT_STANDARD_2026.md`](https://github.com/gasyoun/Uprava/blob/main/docs/REVIEW_SHEET_CONTENT_STANDARD_2026.md)).** MG, reviewing the v2 re-glue card: «typology always needs to be supported by statistics, make it a general rule» — the card asked a reviewer to approve a typology whose distribution (1,534 restatements · 250 additions · 1 correction, ≈86% of everything glued onto PWG is PW abridging what PWG already said) was invisible on the card; a label with no denominator invites the reader to over-weight the rare class.
+- **U7 — typology / classification labels must carry their count and population share ([H2846](https://github.com/gasyoun/Uprava/blob/main/handoffs/archive/H2846-Sonnet_Uprava_review-sheet-typology-requires-statistics-standard_15.08.26.md), new universal row in [`docs/REVIEW_SHEET_CONTENT_STANDARD_2026.md`](https://github.com/gasyoun/Uprava/blob/main/docs/REVIEW_SHEET_CONTENT_STANDARD_2026.md)).** MG, reviewing the v2 re-glue card: «typology always needs to be supported by statistics, make it a general rule» — the card asked a reviewer to approve a typology whose distribution (1,534 restatements · 250 additions · 1 correction, ≈86% of everything glued onto PWG is PW abridging what PWG already said) was invisible on the card; a label with no denominator invites the reader to over-weight the rare class.
   - New opt-in item field ``item["typology"] = [{"label", "n", "share"}, ...]`` (or ``"share_unknown": True``), rendered as ``.badge-typology`` chips distinct from plain ``badges`` — e.g. `restatement (n=1534, 86%)`. Omitting ``n`` or ``share`` raises ``PreflightError`` at build time (``_check_typology_stats``, same call site as V10/V13); items with no ``typology`` key are unaffected.
   - Tests: `tests/test_typology_stats.py` (7 cases: renders label+count+share, `share_unknown` text, and a raise per missing field).
   - Released as a **minor**: a new opt-in structural gate + rendering path, not a bugfix.
@@ -138,7 +138,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`csl_pyutil.integrity_tripwire` — a committed checksum + key-set on human-reviewed overlay data, red in CI when a writer wipes it ([H2891](https://github.com/gasyoun/Uprava/blob/main/handoffs/H2891-Opus_csl-pyutil_q7-integrity-tripwire-checker_16.08.26.md), wave 1 of the Q7 data-integrity programme; census [H2890](https://github.com/gasyoun/Uprava/blob/main/handoffs/H2890-Opus_Uprava_q7-integrity-census-contract_16.08.26.md)).** Three stores have each lost human review work to an automated writer that left a file which still parsed, still had roughly the right row count, and still passed CI: csl-atlas's `build-r2-checkpoint-review.mjs --reseed` skips `loadPreserved` and resets every human ruling; eleven WhitneyRoots `scripts/dcs/apply_*.py` writers open `src/app_data.json` with `'w'` and no lock, no reviewed gate and no backup; and pwg_ru's `run_batch.py` — the very code that *creates* the reviewer stamps — rewrites the 26 MB gitignored store with no lock and no `--override-reviewed`. In every case the loss was silent for months. This module is the thing that was missing: something watching.
+- **`csl_pyutil.integrity_tripwire` — a committed checksum + key-set on human-reviewed overlay data, red in CI when a writer wipes it ([H2891](https://github.com/gasyoun/Uprava/blob/main/handoffs/archive/H2891-Opus_csl-pyutil_q7-integrity-tripwire-checker_16.08.26.md), wave 1 of the Q7 data-integrity programme; census [H2890](https://github.com/gasyoun/Uprava/blob/main/handoffs/archive/H2890-Opus_Uprava_q7-integrity-census-contract_16.08.26.md)).** Three stores have each lost human review work to an automated writer that left a file which still parsed, still had roughly the right row count, and still passed CI: csl-atlas's `build-r2-checkpoint-review.mjs --reseed` skips `loadPreserved` and resets every human ruling; eleven WhitneyRoots `scripts/dcs/apply_*.py` writers open `src/app_data.json` with `'w'` and no lock, no reviewed gate and no backup; and pwg_ru's `run_batch.py` — the very code that *creates* the reviewer stamps — rewrites the 26 MB gitignored store with no lock and no `--override-reviewed`. In every case the loss was silent for months. This module is the thing that was missing: something watching.
   - **The gate is a projection, not the file.** Only the census key fields plus the census reviewed fields of the rows a store's predicate calls reviewed. A reformat, a row reorder, an added field elsewhere, or an edit to unreviewed content is invisible; a dropped `reviewer` stamp is not. A whole-file SHA-256 was tried first and cried wolf — H2153 saw pwg_ru shrink **1.29 MB at an identical row count** from a serializer change — and a gate that is red for benign churn is a gate that gets ignored.
   - **Two digests, because one catches half the failures.** `overlay_sha256` answers *did the reviewed content change* (an overwrite in place leaves the key set untouched); `keyset_sha256` answers *did the reviewed row set change* (a deletion leaves surviving content untouched).
   - **Row order is deliberately NOT part of the digest.** Every writer in all three stores rewrites wholesale and several reorder as a side effect. Reviewed rows are proven key-unique at extract time, so sorting them cannot fold two rulings into one.
@@ -155,7 +155,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **The clock did not stop on export — the semantics were inside out ([H2887](https://github.com/gasyoun/Uprava/blob/main/handoffs/H2887-Opus_csl-pyutil_review-sheet-v14-clock-stop-misvote-fix-voting-ux_16.08.26.md)).** MG, curating the private sheet 16-08-2026: «Когда я сохраняю решения, таймер должен останавливаться. Сейчас этого не происходит.» V12 ([H2858](https://github.com/gasyoun/Uprava/blob/main/handoffs/archive/H2858-Opus_csl-pyutil_review-sheet-partial-submit-pause-timer_15.08.26.md)) wrote `__timePauseSet(true)` into the `handinBtn` handler **only**, so the PARTIAL exit («Hand in what I got») stopped the clock and the FULL one («Download decisions.json», the `strict_review` variant, the file-picker) did not — one `setInterval`, zero `clearInterval` in every published sheet.
+- **The clock did not stop on export — the semantics were inside out ([H2887](https://github.com/gasyoun/Uprava/blob/main/handoffs/archive/H2887-Opus_csl-pyutil_review-sheet-v14-clock-stop-misvote-fix-voting-ux_16.08.26.md)).** MG, curating the private sheet 16-08-2026: «Когда я сохраняю решения, таймер должен останавливаться. Сейчас этого не происходит.» V12 ([H2858](https://github.com/gasyoun/Uprava/blob/main/handoffs/archive/H2858-Opus_csl-pyutil_review-sheet-partial-submit-pause-timer_15.08.26.md)) wrote `__timePauseSet(true)` into the `handinBtn` handler **only**, so the PARTIAL exit («Hand in what I got») stopped the clock and the FULL one («Download decisions.json», the `strict_review` variant, the file-picker) did not — one `setInterval`, zero `clearInterval` in every published sheet.
 - **Silent misvote — vote-data corruption nobody had reported.** `a`/`r`/`d` targeted `vis[activeIdx]`, and `activeIdx` moved on **arrow keys only**: no scroll handler, no focus ring. Scroll to card 40 with the mouse, press `a`, and the vote landed on whatever card the arrows last pointed at, off-screen, with no warning — while V11's clock billed the time to the card at the viewport centre (`__timeActiveId()`). Two layers disagreeing about "the current card" is how a vote silently lands on the wrong row. Both defects lived in the canonical emitter on `main`, so **every** sheet ever built carried them.
 
 ### Added
@@ -182,7 +182,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`<meta name="generator">` tag, `extras=True` only ([H2854](https://github.com/gasyoun/Uprava/blob/main/handoffs/H2854-Sonnet_Uprava_vote-platform-w1-build_15.08.26.md) step 1).**
+- **`<meta name="generator">` tag, `extras=True` only ([H2854](https://github.com/gasyoun/Uprava/blob/main/handoffs/archive/H2854-Sonnet_Uprava_vote-platform-w1-build_15.08.26.md) step 1).**
   Every render stamps `<meta name="generator" content="csl-pyutil/{__version__}">`
   right after the color-scheme meta, before `<title>`. This is the whole
   mechanism the vote hub's weekly CI staleness check (gasyoun.github.io) needs
@@ -198,7 +198,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   occur in the same question. A defective card raises `PreflightError` naming
   it; an absent `identity_gate` emits a `PreflightWarning` (same migration-ramp
   shape as V9's manifest warning — an error in 1.0.0). **Named V13, not the
-  plan's original "V12"**: [H2858](https://github.com/gasyoun/Uprava/blob/main/handoffs/H2858-Opus_csl-pyutil_review-sheet-partial-submit-pause-timer_15.08.26.md)
+  plan's original "V12"**: [H2858](https://github.com/gasyoun/Uprava/blob/main/handoffs/archive/H2858-Opus_csl-pyutil_review-sheet-partial-submit-pause-timer_15.08.26.md)
   merged the same day and already claimed V12 for the partial hand-in + pause
   layer (v0.11.0) — this build takes the plan's own ambiguity-contract default
   (decision 14, default+log) rather than colliding with a shipped feature.
@@ -222,7 +222,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **V12 — «hand in what I got» + a pausable clock, on by default for every
   `extras=True` sheet
-  ([H2858](https://github.com/gasyoun/Uprava/blob/main/handoffs/H2858-Opus_csl-pyutil_review-sheet-partial-submit-pause-timer_15.08.26.md)).**
+  ([H2858](https://github.com/gasyoun/Uprava/blob/main/handoffs/archive/H2858-Opus_csl-pyutil_review-sheet-partial-submit-pause-timer_15.08.26.md)).**
   MG, after one sitting on the BookIndex crosswalk gate (15-08-2026 — 30 approve
   / 14 reject of 255 cards in 14 minutes): «Хочу поставить на паузу, остановить
   таймер и остановить работу, сдать то что было. Но такой функции как сдать
@@ -259,7 +259,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **V11 — active-time metering, on by default for every `extras=True` sheet
-  ([H2840](https://github.com/gasyoun/Uprava/blob/main/handoffs/H2840-Fable_csl-pyutil_review-sheet-timing-v11_15.08.26.md)).**
+  ([H2840](https://github.com/gasyoun/Uprava/blob/main/handoffs/archive/H2840-Fable_csl-pyutil_review-sheet-timing-v11_15.08.26.md)).**
   MG, voting the BookIndex crosswalk gate 15-08-2026: the sheet itself must
   measure how long the reviewer spends on the page and on each card — here and
   in every other vote. A 1 s tick accumulates while the tab is visible (a gap

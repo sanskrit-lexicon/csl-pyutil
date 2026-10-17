@@ -9,7 +9,7 @@ Programme roadmap: [ROADMAP_SPINE_INTERCONNECTION_2026H2.md](https://github.com/
 
 ## Wave 1 — csl-pyutil's wiring change
 
-- [ ] [H3573 (Sonnet 5)](https://github.com/gasyoun/Uprava/blob/main/handoffs/H3573-Sonnet_csl-pyutil_interconnect-cslpyutil-claudemd-findings-pointer_26.08.26.md) · trivial
+- [ ] [H3573 (Sonnet 5)](https://github.com/gasyoun/Uprava/blob/main/handoffs/archive/H3573-Sonnet_csl-pyutil_interconnect-cslpyutil-claudemd-findings-pointer_26.08.26.md) · trivial
 
 ## Order and prerequisites
 

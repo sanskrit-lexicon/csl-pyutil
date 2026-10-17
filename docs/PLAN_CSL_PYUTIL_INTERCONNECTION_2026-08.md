@@ -53,7 +53,7 @@ Full rulings table with every fork:
 
 ## Handoff
 
-- [H3573 (Sonnet 5) — interconnect cslpyutil claudemd findings pointer](https://github.com/gasyoun/Uprava/blob/main/handoffs/H3573-Sonnet_csl-pyutil_interconnect-cslpyutil-claudemd-findings-pointer_26.08.26.md) · trivial · 🟡 queued
+- [H3573 (Sonnet 5) — interconnect cslpyutil claudemd findings pointer](https://github.com/gasyoun/Uprava/blob/main/handoffs/archive/H3573-Sonnet_csl-pyutil_interconnect-cslpyutil-claudemd-findings-pointer_26.08.26.md) · trivial · 🟡 queued
 
 ## Autonomy contract
 
