@@ -1644,7 +1644,8 @@ UI_STRINGS = {
     "flow_clock_idle": re.compile(
         r"(?P<pre>var FLOW_CLOCK_IDLE = ')(?P<body>[^']*)(?P<post>';)"),
     # V16 inbox (H2991) — present only when config["github_inbox"] is passed and
-    # config["personal_data"] is not True. As with handin_said, the status
+    # neither config["personal_data"] nor config["eval_holdout"] is True.
+    # As with handin_said, the status
     # sentences are assembled in JS, so each is one single-quoted literal whose
     # {n}/{pack}/{url}/{code}/{why} placeholders a translation keeps verbatim.
     "inbox_button": "Save to GitHub",
@@ -3400,6 +3401,13 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
     personal_data = config.get("personal_data", False)
     if not isinstance(personal_data, bool):
         raise TypeError("personal_data must be a bool")
+    # H8433 (MG 18-11-2026). An eval holdout is the same kind of no-go: a held-out
+    # canary sheet whose gate is off the public vote hub must never acquire a
+    # control that publishes ids/verdicts — nor the hydrate read — by accident of
+    # a generator passing github_inbox. Fail closed; the default is unchanged.
+    eval_holdout = config.get("eval_holdout", False)
+    if not isinstance(eval_holdout, bool):
+        raise TypeError("eval_holdout must be a bool")
     # V17 (MG 18-08-2026): progress and submit controls where the reviewer's eye is.
     vote_ux = config.get("vote_ux", True)
     if not isinstance(vote_ux, bool):
@@ -3424,7 +3432,7 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
                              "item count (%d)" % (packset_total, len(items)))
     inbox_raw = config.get("github_inbox")
     inbox = None
-    if inbox_raw is not None and not personal_data:
+    if inbox_raw is not None and not personal_data and not eval_holdout:
         pack_info = config.get("pack") or {}
         inbox = _normalize_inbox(inbox_raw, int(pack_info.get("index", 1)),
                                  int(pack_info.get("total", 1)))
@@ -3577,7 +3585,9 @@ def render_review_sheet_packset(items, config, *, extras=True, screening=None,
     and the hydrate read — see :func:`_normalize_inbox`. Each pack writes
     ``decisions/<sheet_id>/pack-NN.json`` in the inbox repo, so packs never
     overwrite one another. ``config["personal_data"] = True`` removes the control
-    and the read entirely, whatever ``github_inbox`` says.
+    and the read entirely, whatever ``github_inbox`` says; ``config["eval_holdout"]
+    = True`` does the same for held-out evaluation sheets that must stay off the
+    public vote hub (H8433).
 
     ``screening`` / ``manifest`` are forwarded to every pack unchanged: both
     describe the WHOLE sheet's provenance, and the manifest's own checks are
