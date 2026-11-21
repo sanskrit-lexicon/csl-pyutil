@@ -33,7 +33,7 @@ import warnings
 
 from csl_pyutil.evidence import PreflightError, PreflightWarning, preflight
 
-__version__ = "0.25.0"
+__version__ = "0.25.1"
 
 __all__ = ["render_review_sheet", "render_review_sheet_packset", "esc", "mark_cyrillic",
            "RU_UI_STRINGS"]
@@ -1696,6 +1696,13 @@ UI_STRINGS = {
     "store_summary": re.compile(
         r'(?P<pre><summary class="store-link">)(?P<body>store markup — quote this in the note)'
         r'(?P<post></summary>)'),
+    # V18 intro collapse (MG 21-11-2026) — the count word in the folded
+    # one-line summary. Deliberately Russian by default («шт.»): every live
+    # sheet in the estate reviews in Russian and MG's spec names the form
+    # «(30 шт., 8 правил)»; an English-chrome sheet overrides to "items" the
+    # same way it overrides every other key. Body is the word only — the
+    # digits in front and the note (or closing paren) after stay caller-baked.
+    "intro_items_word": re.compile(r"(?P<pre>\(\d+ )(?P<body>шт\.)(?P<post>)"),
 }
 
 
@@ -1783,6 +1790,12 @@ RU_UI_STRINGS = {
     "inbox_failed": "сохранить в GitHub не удалось: {why}",
     "count_suffix": "карточек",
     "generated_label": "Собрано",
+    # V18 intro collapse (MG 21-11-2026). Deliberately identity: the emitter
+    # default is already «шт.» (every live sheet reviews in Russian; the spec
+    # names «(30 шт., 8 правил)»), so this entry translates nothing — it keeps
+    # the preset's every-key contract true and pins the Russian word if the
+    # emitter default ever flips to English chrome.
+    "intro_items_word": "шт.",
     "doc_lang": "ru",
     "filter_all": "все",
     "filter_unvoted": "только непроголосованные",
@@ -2518,6 +2531,118 @@ def _add_vote_ux(doc, packset_total):
     return doc
 
 
+# ----------------------------------------------------------------------------- V18 intro collapse (MG 21-11-2026)
+# MG, after the compound-rules ratification sheet (compound_rules_30) put its
+# whole briefing INSIDE the header: «Собрано … · sheet_id …», the paragraph
+# «Вы решаете НЕ отдельные слова, а правила…», and the 8-rule × queue-rows
+# summary table — all in the sticky header, half a screen before the first
+# card. The ruling: the vote-sheet header must collapse to ONE line by default
+# on every votable sheet — compact title + the existing HUD (✅/❌/⏸ counts,
+# ⏱ running timer, ◯ card progress) — with everything else one click away.
+#
+# Design constraints that shaped the layer:
+#
+# * The HUD (#tally chips, ⏱/pause, V17 .voteprog) stays OUTSIDE the fold at
+#   its exact DOM position: V11/V12/V15/V17 address those nodes by id at build
+#   time and runtime, so the fold wraps ONLY the intro <div> (h1 + .sub).
+# * The h1/.sub lines are moved, never rewritten — the sheet_id display, the
+#   V14 export-context chip injected beside it, and the count_suffix /
+#   generated_label localization patterns all still match byte-for-byte.
+# * The screening banner (H1649) is a compliance surface below </header>; it
+#   is not part of the header and stays fully visible.
+# * extras=False is untouched: the donor fixture must stay byte-identical.
+# * Default summary word is «шт.» per the spec (every live sheet reviews in
+#   Russian); UI_STRINGS["intro_items_word"] localizes it for an English sheet.
+_INTRO_COLLAPSE_CSS = '''  /* V18 intro collapse (MG 21-11-2026): the header intro folds into one
+     compact line; the HUD (tally) rides beside it, outside the fold. */
+  header.top details.intro-collapse { flex:1 1 340px; min-width:0; }
+  details.intro-collapse > summary {
+    list-style:none; cursor:pointer; font-size:13px; font-weight:600;
+    color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    padding:1px 0; user-select:none; }
+  details.intro-collapse > summary::-webkit-details-marker { display:none; }
+  details.intro-collapse > summary .intro-tri {
+    display:inline-block; width:.9em; color:var(--muted);
+    transition:transform .12s ease; }
+  details.intro-collapse[open] > summary .intro-tri { transform:rotate(90deg); }
+  details.intro-collapse .intro-body { margin-top:6px; }
+  @media print {
+    details.intro-collapse { flex:1 1 100%; }
+    details.intro-collapse > summary { white-space:normal; overflow:visible; }
+  }
+'''
+
+#: The finished header's first block, as every earlier layer leaves it. The
+#: close anchor is the tally's own opening tag, so a subtitle containing
+#: ``</div>`` cannot fool the boundary — only the wrapper's closing tag is
+#: directly followed by the tally line.
+_INTRO_HEADER_RE = re.compile(
+    r'(?P<open><header class="top">\n  <div>\n)'
+    r'(?P<body>.*?)'
+    r'(?P<close>\n  </div>\n  <div class="tally")',
+    re.DOTALL)
+
+_INTRO_PRINT_JS = '''  // V18: a closed <details> hides its content at the UA level — no CSS rule
+  // can undo that — so paper/PDF keeps the full intro by opening the element
+  // around the print and restoring the collapsed state after it.
+  (function () {
+    var __icEl = document.querySelector('details.intro-collapse');
+    if (!__icEl) return;
+    var __icWasOpen = false;
+    window.addEventListener('beforeprint', function () {
+      __icWasOpen = __icEl.hasAttribute('open');
+      if (!__icWasOpen) __icEl.setAttribute('open', '');
+    });
+    window.addEventListener('afterprint', function () {
+      if (!__icWasOpen) __icEl.removeAttribute('open');
+    });
+  })();
+'''
+
+
+def _intro_short_title(title):
+    """The compact summary title: the sheet title up to its first ``:``.
+
+    The estate's title convention is «Short subject: purpose» («Правила
+    членения сложных слов PWG: ратификация»), and MG's spec line shows exactly
+    that cut («Правила членения сложных слов PWG (30 шт., 8 правил)»). A title
+    with no colon (or one whose first segment would be empty) folds nothing:
+    the whole title shows, ellipsized by CSS if long.
+    """
+    return title.split(":", 1)[0].strip() or title
+
+
+def _add_intro_collapse(doc, n, title, note):
+    """V18 (MG 21-11-2026) — fold the header intro into one compact line.
+
+    Wraps the finished header's intro <div> (h1 + .sub) in a collapsed
+    ``<details class="intro-collapse">`` whose ``<summary>`` is the one line
+    the ruling specifies: ``▸ {short title} ({n} шт.{note})``. The HUD stays
+    outside; the inner lines keep their exact bytes.
+
+    Last of the DOM layers (after V17/split_layout, before ``_localize``):
+    every earlier layer's anchors still see the markup they were written
+    against, and the fold's own anchor is the finished header's shape. Only
+    the extras path calls this — the donor fixture path must stay
+    byte-identical.
+    """
+    if "</style>" in doc:
+        doc = doc.replace("</style>", _INTRO_COLLAPSE_CSS + "</style>", 1)
+    if not _INTRO_HEADER_RE.search(doc):
+        raise ValueError("review-sheet intro header anchor is missing")
+    summary = ('<details class="intro-collapse">\n'
+               '<summary><span class="intro-tri">&#9656;</span> %s (%d шт.%s)</summary>\n'
+               '<div class="intro-body">' % (_intro_short_title(title), n, note))
+    # The close group is a fixed literal (wrapper close + tally open); it is
+    # reconstructed rather than echoed so the original wrapper's ``</div>``
+    # is replaced by the fold's ``</div></details>`` exactly once.
+    doc = _INTRO_HEADER_RE.sub(
+        lambda mm: ('<header class="top">\n' + summary + "\n" + mm.group("body")
+                    + '\n    </div>\n  </details>\n  <div class="tally"'),
+        doc, count=1)
+    return doc.replace("})();\n</script>", _INTRO_PRINT_JS + "})();\n</script>", 1)
+
+
 # ----------------------------------------------------------------------------- V16 packs + GitHub inbox (H2991)
 # W3 track B. Two problems, one layer:
 #
@@ -2938,7 +3063,8 @@ def _render_pack_parent(config, pack_slices, hub_name):
     }
 
 
-def render_review_sheet(items, config, *, extras=True, screening=None, manifest=None):
+def render_review_sheet(items, config, *, extras=True, screening=None, manifest=None,
+                        intro_summary_note=""):
     """Build a self-contained HTML review/voting sheet.
 
     items: list of dicts, each ``{"id", "filt", "title", "badges": [...]
@@ -2977,15 +3103,30 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
         sheet whose items carry no such flag is unaffected.
 
     config["identity_gate"]: **V13 (H2854)** — ``{"patterns": [regex, ...],
-        "labels": {match: label, ...}}``. Deterministic, no heuristics: every
-        distinct regex match against a card's tag-stripped ``question`` must
-        have a ``labels`` entry, and that label's text must itself appear in
-        the same question — the acc001 lesson (H2841/H2842), a reviewer must
-        not be able to vote on a bare internal id. A defective card raises
-        ``PreflightError`` naming it. Absent ``identity_gate``: a
-        ``PreflightWarning`` (same migration-ramp shape as V9's manifest
-        warning, becomes an error in 1.0.0). Named V13, not V12 — H2858 (same
-        day) already shipped V12 for the partial hand-in + pause layer.
+    "labels": {match: label, ...}}``. Deterministic, no heuristics: every
+    distinct regex match against a card's tag-stripped ``question`` must
+    have a ``labels`` entry, and that label's text must itself appear in
+    the same question — the acc001 lesson (H2841/H2842), a reviewer must
+    not be able to vote on a bare internal id. A defective card raises
+    ``PreflightError`` naming it. Absent ``identity_gate``: a
+    ``PreflightWarning`` (same migration-ramp shape as V9's manifest
+    warning, becomes an error in 1.0.0). Named V13, not V12 — H2858 (same
+    day) already shipped V12 for the partial hand-in + pause layer.
+
+    intro_summary_note: **V18 (MG 21-11-2026)** — an optional suffix baked
+        verbatim into the collapsed one-line summary the header shows by
+        default, e.g. ``", 8 правил"`` renders
+        «▸ Правила членения сложных слов PWG (30 шт., 8 правил)». The whole
+        intro block (h1 + the ``.sub`` meta/description line, including any
+        tables a generator packs into ``subtitle``) folds into a collapsed
+        ``<details class="intro-collapse">`` — one compact line by default,
+        click to unfold, auto-expanded for print/PDF. The HUD (✅/❌/⏸/⏱/◯
+        chips, pause, progress) stays outside the fold, and the screening
+        banner (H1649) below the header stays fully visible. The compact
+        title is the sheet title up to its first ``:``. Default ``""`` gives
+        the plain ``(N шт.)`` form; the count word localizes via
+        ``ui_strings["intro_items_word"]``. Incompatible with
+        ``extras=False`` (the donor path must stay byte-identical).
     item["typology"]: **U7 (H2846)** — ``[{"label", "n", "share"}, ...]``, one
         entry per classification label this card is being asked to confirm.
         Rendered as chips distinct from plain ``badges``, each showing the
@@ -3189,6 +3330,12 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
     elif screening is not None:
         # Donor path must stay byte-identical; refuse silent mixing.
         raise ValueError("screening= is incompatible with extras=False")
+    if not isinstance(intro_summary_note, str):
+        raise TypeError("intro_summary_note must be a string")
+    if intro_summary_note and not extras:
+        # Same rule as screening=: the donor fixture must stay byte-identical,
+        # so a note that would silently vanish is a build error instead.
+        raise ValueError("intro_summary_note is incompatible with extras=False")
 
     # V10 first: a sheet that should not exist is not worth rendering.
     _check_non_decisions(items, config.get("non_decision_share", 0.0))
@@ -3391,6 +3538,10 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
     if split_layout:
         # After V17 so #voteBar exists for the current-card mirror.
         doc = _add_split_layout(doc)
+    # V18, last of the DOM layers: every earlier layer's anchor has already
+    # seen the header it was written against, and _localize (next) can still
+    # rewrite both the folded h1/.sub lines and the summary's count word.
+    doc = _add_intro_collapse(doc, len(items), config["title"], intro_summary_note)
     doc = _localize(doc, config.get("ui_strings"))
     # Last, on the finished document: the script-purity and citation checks must see
     # exactly what the reviewer will see, translations and all.
@@ -3398,7 +3549,7 @@ def render_review_sheet(items, config, *, extras=True, screening=None, manifest=
 
 
 def render_review_sheet_packset(items, config, *, extras=True, screening=None,
-                                manifest=None, hub_name=None):
+                                manifest=None, hub_name=None, intro_summary_note=""):
     """V16 (H2991) — split a long sheet into packs of ``config["pack_size"]`` (10).
 
     A 320-card sheet is one file and one sitting nobody finishes. This returns
@@ -3432,6 +3583,12 @@ def render_review_sheet_packset(items, config, *, extras=True, screening=None,
     describe the WHOLE sheet's provenance, and the manifest's own checks are
     manifest-level (evidence floor, prior art) or text-level against the document
     in hand, so a slice neither weakens nor falsely trips them.
+
+    ``intro_summary_note`` (V18, MG 21-11-2026) is likewise forwarded to every
+    pack: the note describes the whole instrument, not one pack's ten cards.
+    Each pack's collapsed summary line counts ITS OWN cards (``(10 шт.)`` on a
+    30-card packset) exactly as its h1 always has; the parent index page is not
+    a votable sheet and keeps its plain header.
     """
     pack_size = config.get("pack_size", _PACK_SIZE_DEFAULT)
     if not isinstance(pack_size, int) or isinstance(pack_size, bool):
@@ -3442,7 +3599,8 @@ def render_review_sheet_packset(items, config, *, extras=True, screening=None,
     if len(items) <= pack_size:
         return {"parent": None,
                 "packs": [render_review_sheet(items, config, extras=extras,
-                                              screening=screening, manifest=manifest)]}
+                                              screening=screening, manifest=manifest,
+                                              intro_summary_note=intro_summary_note)]}
     slices = [items[i:i + pack_size] for i in range(0, len(items), pack_size)]
     packs = []
     for n, sl in enumerate(slices, 1):
@@ -3453,6 +3611,7 @@ def render_review_sheet_packset(items, config, *, extras=True, screening=None,
         # how long the whole thing takes at the pace they are going.
         cfg.setdefault("packset_total", len(items))
         packs.append(render_review_sheet(sl, cfg, extras=extras,
-                                         screening=screening, manifest=manifest))
+                                         screening=screening, manifest=manifest,
+                                         intro_summary_note=intro_summary_note))
     parent = _render_pack_parent(config, slices, hub_name or config["sheet_id"])
     return {"parent": parent, "packs": packs}

@@ -1,4 +1,4 @@
-_Created: 14-07-2026 · Last updated: 24-09-2026_
+_Created: 14-07-2026 · Last updated: 21-11-2026_
 
 # Changelog
 
@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.25.1] - 2026-11-21
+
+### Added
+
+- **The vote-sheet header collapses to ONE line by default — the whole intro block now folds into a click-to-unfold `<details>`** (GLM 5.3 `opencode/glm-5.3`, 21-11-2026; MG ruling 21-11-2026, after the compound_rules_30 sitting). A generator's `subtitle` is free HTML and routinely carries a paragraph plus a summary table (the compound-rules sheet: «Собрано … · sheet_id …», the briefing paragraph, and the 8-rule × queue-rows table), so the sticky header ate half a screen before the first card and pushed voting below the fold. The entire intro block — h1 + `.sub` — now wraps in a collapsed `<details class="intro-collapse">` on every `extras=True` sheet (packs included; the packset parent index is not a votable sheet and keeps its plain header). The one visible line is the summary the ruling specifies: `▸ {short title} ({n} шт.{note})` — the compact title is the sheet title up to its first `:` («Правила членения сложных слов PWG (30 шт., 8 правил)»), and the new optional `render_review_sheet(..., intro_summary_note=", 8 правил")` kwarg (forwarded unchanged by `render_review_sheet_packset` to every pack) lets a generator enrich it; default `""` gives the plain `(N шт.)` form. The HUD — ✅/❌/⏸ counts, the ⏱ timer, the pause button, ◯ card progress, V17's progress bar — keeps its exact DOM ids and stays OUTSIDE the fold, so the V11/V12/V15/V17 scripts address the same nodes as before; the h1/`.sub` lines move byte-identical (the sheet_id display, the V14 export-context chip injected beside it, and the `count_suffix`/`generated_label` localization patterns all still match), the screening banner (H1649) below the header stays fully visible, and `extras=False` is untouched (donor fixture byte-identical; a note passed on that path raises, the same refuse-silent-mixing rule as `screening=`). Print/PDF keeps the full context: a `beforeprint` handler opens the element around the print and an `afterprint` restores the collapsed state (a closed `<details>` hides its slots at the UA level and no CSS rule can undo that), with a `@media print` rule as belt. The count word localizes via the new `ui_strings["intro_items_word"]` key — default «шт.» per the spec, because every live sheet in the estate reviews in Russian; `RU_UI_STRINGS` carries it as an identity entry to keep the preset's every-key contract true.
 
 ## [0.25.0] - 2026-09-24
 
