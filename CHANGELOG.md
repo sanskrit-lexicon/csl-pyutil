@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`config["eval_holdout"] = True` removes the V16 `github_inbox` layer entirely** (Hy4 flash Free `opencode-go/hy4-flash-free`, 21-11-2026; H8433). A held-out evaluation sheet — e.g. the blind MG canary, whose gate is deliberately off the public vote hub — must never acquire a *Save to GitHub* control or the hydrate read by accident of a generator passing `github_inbox`. The flag is validated as a bool and checked at the same point as `personal_data`, so the button, its JS and the hydrate are absent from the emitted document; the pack split still happens. Default `False` is byte-identical: no consumer changes. Tests: `tests/test_v16_packset.py` — absence of all four layer identifiers, split preserved, bool validation, default-on inbox, plus `node --check` over the new layer combination.
+
 ## [0.25.1] - 2026-11-21
 
 ### Added

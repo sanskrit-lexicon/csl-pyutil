@@ -268,6 +268,33 @@ def test_personal_data_must_be_a_bool():
         _packset(_n_items(11), personal_data="yes")
 
 
+# --------------------------------------------------------------------- eval holdout
+
+def test_eval_holdout_removes_the_github_button():
+    """H8433 — a held-out canary must not gain a public publish control."""
+    out = _packset(_n_items(11), github_inbox=_INBOX, eval_holdout=True)
+    for ident in ("inboxBtn", "__inboxPut", "__inboxHydrate", "var INBOX ="):
+        assert ident not in out["packs"][0]
+
+
+def test_eval_holdout_still_packs():
+    """Removing the inbox must not remove the reason the sheet was split."""
+    out = _packset(_n_items(22), github_inbox=_INBOX, eval_holdout=True)
+    assert len(out["packs"]) == 3
+    assert out["parent"] is not None
+
+
+def test_eval_holdout_must_be_a_bool():
+    with pytest.raises(TypeError, match="eval_holdout"):
+        _packset(_n_items(11), eval_holdout="yes")
+
+
+def test_eval_holdout_default_off_preserves_the_inbox():
+    """No consumer break: without the flag the button is still emitted."""
+    out = _packset(_n_items(11), github_inbox=_INBOX)
+    assert 'id="inboxBtn"' in out["packs"][0]
+
+
 # --------------------------------------------------------------------- note hygiene
 
 def test_note_rules_are_pinned_in_the_emitted_guard():
@@ -357,6 +384,7 @@ def test_every_new_ui_strings_key_has_a_russian_value():
     {"github_inbox": _INBOX},
     {"github_inbox": dict(_INBOX, client_id="")},
     {"github_inbox": _INBOX, "personal_data": True},
+    {"github_inbox": _INBOX, "eval_holdout": True},
     {"github_inbox": _INBOX, "ui_strings": RU_UI_STRINGS},
     {"github_inbox": _INBOX, "timing": False, "hand_in": False, "session_flow": False},
 ])
